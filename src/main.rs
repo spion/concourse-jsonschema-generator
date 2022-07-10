@@ -20,21 +20,19 @@ pub struct Schema {
   schema_name: String,
   properties: HashMap<String, Property>,
 }
-
-#[derive(Debug, PartialEq, Eq, Hash)]
-enum PropertyType {
-  OneOf(Vec<PropertyType>),
-  Constant(String),
-  Ref(String),
-  ArrayOf(Box<PropertyType>),
-}
-
 #[derive(Debug, PartialEq, Eq, Hash)]
 pub struct Property {
   type_name: PropertyType,
   required: bool,
   list: bool,
   docs: String,
+}
+#[derive(Debug, PartialEq, Eq, Hash)]
+enum PropertyType {
+  OneOf(Vec<PropertyType>),
+  Constant(String),
+  Ref(String),
+  ArrayOf(Box<PropertyType>),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -45,45 +43,6 @@ pub enum Json {
   Bool(bool),
   Number(String),
   Null,
-}
-
-peg::parser! {
-  grammar json_parser() for str {
-
-
-    pub rule json() -> Json
-      = _ val:(string_val() / object() / number() / null() / bool() / array()) _
-      { val }
-
-    rule _
-      = [' ' | '\n']*
-
-    rule string() -> String
-      = _ "\"" content:$(("\\\"" / [^ '"']+)+) "\"" _ { content.to_string() }
-
-    rule string_val() -> Json
-      = content:string() { Json::String(content) }
-
-    rule kvpair() -> (String, Json)
-      = key:(string()) ":" value:(json()) { (key, value) }
-
-    rule object() -> Json
-      = "{" kvpairs:(kvpair() ** ",") "}" {
-        Json::Object(kvpairs.into_iter().collect())
-      }
-
-    rule number() -> Json
-      = num:$("-"? ['.' | '0'..='9']+) { Json::Number(num.to_string()) }
-
-    rule bool() -> Json
-      = b:$("true" / "false") { Json::Bool(b == "true") }
-
-    rule array() -> Json
-      = "[" l:(json() ** ",") "]" { Json::Array(l) }
-
-    rule null() -> Json
-      = "null" { Json::Null }
-  }
 }
 
 peg::parser! {
@@ -328,19 +287,6 @@ fn parse(contents: &str) -> Result<Vec<Schema>, ParseError<LineCol>> {
   Result::Ok(transform_to_jsonschemas(&lit_document))
 }
 
-/// Concourse documentation parser
-#[derive(Parser, Debug)]
-#[clap(author, version, about, long_about = None)]
-struct Args {
-  /// Path to the lit files to parse
-  #[clap(value_parser)]
-  litfiles: Vec<String>,
-
-  /// Existing schema
-  #[clap(short, long, default_value = "schema.json")]
-  schema: String,
-}
-
 fn prop_type_to_jsonschema_nodocs(prop_type: &PropertyType) -> String {
   prop_type_to_jsonschema(prop_type, None)
 }
@@ -389,6 +335,18 @@ fn prop_type_to_jsonschema(prop_type: &PropertyType, description: Option<&String
   format!(r#"{{{}{}}}"#, desc, additional)
 }
 
+/// Concourse documentation parser
+#[derive(Parser, Debug)]
+#[clap(author, version, about, long_about = None)]
+struct Args {
+  /// Path to the lit files to parse
+  #[clap(value_parser)]
+  litfiles: Vec<String>,
+
+  /// Existing schema
+  #[clap(short, long, default_value = "schema.json")]
+  schema: String,
+}
 pub fn main() {
   let args = Args::parse();
 
