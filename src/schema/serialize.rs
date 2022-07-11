@@ -35,6 +35,9 @@ fn prop_type_to_jsonschema(prop_type: &PropertyType, description: Option<&String
       prop_type_to_jsonschema(inner, description)
     ),
     PropertyType::Constant(item) => format!(r#""type":"string","enum":["{}"]"#, item),
+    PropertyType::Dict => {
+      r#""type":"object","patternProperties":{".*":{"type":"string"}}"#.to_string()
+    }
     PropertyType::Ref(item) => {
       format!(r##""$ref":"#/definitions/{}""##, item.replace("\\", "\\\\"))
     }

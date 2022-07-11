@@ -1,0 +1,5 @@
+# yaml-language-server: $schema=./schema.json
+
+resource_types:
+  - name: git
+    type: git

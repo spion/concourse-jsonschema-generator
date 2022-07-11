@@ -18,4 +18,5 @@ pub enum PropertyType {
   Constant(String),
   Ref(String),
   ArrayOf(Box<PropertyType>),
+  Dict,
 }

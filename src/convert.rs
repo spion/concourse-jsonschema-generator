@@ -24,7 +24,7 @@ pub fn transform_to_jsonschemas(doc: &LitDocument) -> Vec<Schema> {
             LitNode::Fn(prop, args)
               if (prop == "required-attribute" || prop == "optional-attribute") =>
             {
-              let type_name = raw_text(&args[1]).trim().to_string();
+              let type_name = text_to_markdown(&args[1]).trim().to_string();
 
               let is_list = type_name.starts_with("[");
 
@@ -32,12 +32,13 @@ pub fn transform_to_jsonschemas(doc: &LitDocument) -> Vec<Schema> {
 
               found_schemas.extend(transform_to_jsonschemas(documentation));
 
-              let prop_name = text_to_markdown(&args[0]);
+              let prop_name = text_to_markdown(&args[0]).trim().to_string();
+
               vec![(
                 prop_name,
                 Property {
                   required: prop == "required-attribute",
-                  docs: text_to_markdown(documentation),
+                  docs: text_to_markdown(documentation).trim().to_string(),
                   type_name: parse_type(&type_name.replace("-", "_")),
                   list: is_list,
                 },
@@ -84,19 +85,54 @@ pub fn transform_to_jsonschemas(doc: &LitDocument) -> Vec<Schema> {
     .collect()
 }
 
-fn parse_type(s: &str) -> PropertyType {
-  if s.starts_with("[") && s.ends_with("]") {
-    return PropertyType::ArrayOf(Box::new(parse_type(
-      s.trim_start_matches("[").trim_end_matches("]"),
-    )));
+peg::parser! {
+  grammar lit_type_parser() for str {
+
+    pub rule lit_type() -> PropertyType
+      = union_type() / non_union_type()
+
+    rule non_union_type() -> PropertyType
+      = array_type() / dictionary_type() / constant_type() / ref_type()
+
+    rule array_type() -> PropertyType
+      = "[" inner_type:lit_type() "]" { PropertyType::ArrayOf(Box::new(inner_type)) }
+
+    rule union_type() -> PropertyType =
+      inner_types:(non_union_type() ++ (_ "|" _)) { PropertyType::OneOf(inner_types) }
+
+    rule _ = [' ' | '\n']*;
+
+    rule key_or_value_string() -> String
+      = name:$(['a'..='z' | 'A'..='Z' | '0'..='9' | '.' | '_']+) { String::from(name) }
+
+    rule type_identifier() -> String
+      = name:$(['a'..='z' | 'A'..='Z' | '_']+) { String::from(name) }
+
+    rule dictionary_type() -> PropertyType
+      = "{" _ key_or_value_string() _ ":" _ key_or_value_string() "}" { PropertyType::Dict }
+
+    rule constant_type() -> PropertyType
+      = "`" value:key_or_value_string() "`" { PropertyType::Constant(value) }
+
+    rule ref_type() -> PropertyType
+      = name:key_or_value_string() {
+        PropertyType::Ref(
+          if name.contains(".") { "string".to_string() } else { name }
+        )
+      }
+
+
   }
-  let multi = s.split("|").count();
-  if multi > 1 {
-    PropertyType::OneOf(s.split("|").map(|t| parse_type(t.trim())).collect())
-  } else if s.starts_with("`") && s.ends_with("`") {
-    PropertyType::Constant(s.trim_start_matches("`").trim_end_matches("`").to_string())
-  } else {
-    PropertyType::Ref(s.to_string())
+}
+
+fn parse_type(s: &str) -> PropertyType {
+  match lit_type_parser::lit_type(s) {
+    Ok(res) => res,
+    Err(e) => {
+      println!("Error parsing type: {}", s);
+      println!("{}", e);
+      panic!("Unable to parse type")
+    }
   }
 }
 
@@ -126,10 +162,10 @@ pub fn text_to_markdown(nodes: &Vec<LitNode>) -> String {
         format!("**{}**", text_to_markdown(&args[0]))
       }
       LitNode::Fn(warn, args) if (warn == "warn") => text_to_markdown(&args[0]),
+      LitNode::Fn(_any_, args) => args.iter().map(text_to_markdown).collect(),
       _ => "".to_string(),
     })
     .collect::<String>()
-    .trim()
     .to_string()
     .replace("\\{", "{")
     .replace("\\}", "}")
@@ -138,9 +174,9 @@ pub fn text_to_markdown(nodes: &Vec<LitNode>) -> String {
 pub fn clean_text(text: &str) -> String {
   text
     .lines()
-    .map(|t| t.trim())
-    .collect::<Vec<_>>()
-    .join("\n")
+    .map(|t| t.trim()) // Do not trim beginning of first and end of last
+    .map(|t| if t == "" { "\n\n" } else { t })
+    .collect()
 }
 
 pub fn trim_codeblock(text: &str) -> String {
