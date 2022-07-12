@@ -81,6 +81,8 @@ pub fn serialize(schema_docs: &HashMap<String, Schema>) -> String {
         r#"{"type":"boolean"}"#.to_string()
       } else if schema_name == "config" || schema_name == "value" {
         r#"{"type":"object","patternProperties":{".*":{"additionalProperties":true}}}"#.to_string()
+      } else if schema_name == "env_vars" {
+        r#"{"type":"object","patternProperties":{".*":{"type":"string"}}}"#.to_string()
       } else if schema.group_members.len() > 0 {
         prop_type_to_jsonschema(
           &PropertyType::OneOf(
