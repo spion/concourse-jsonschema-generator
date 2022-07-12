@@ -79,9 +79,9 @@ pub fn serialize(schema_docs: &HashMap<String, Schema>) -> String {
         r#"{"type":"number"}"#.to_string()
       } else if schema_name == "boolean" {
         r#"{"type":"boolean"}"#.to_string()
-      } else if schema_name == "config" || schema_name == "value" {
+      } else if schema_name == "config" || schema_name == "value" || schema_name == "vars" {
         r#"{"type":"object","patternProperties":{".*":{"additionalProperties":true}}}"#.to_string()
-      } else if schema_name == "env_vars" {
+      } else if schema_name == "env_vars" || schema_name == "version" {
         r#"{"type":"object","patternProperties":{".*":{"type":"string"}}}"#.to_string()
       } else if schema.group_members.len() > 0 {
         prop_type_to_jsonschema(
