@@ -14,6 +14,7 @@ pub fn transform_to_jsonschemas(doc: &LitDocument) -> Vec<Schema> {
           let mut found_schemas: Vec<Schema> = vec![];
 
           let schema_name = text_to_markdown(&args[0])
+            .trim()
             .replace("`", "_")
             .replace("-", "_")
             .replace(" ", "_")
