@@ -4,6 +4,9 @@ resource_types:
   - name: git
     type: git
 
+resources:
+- type: a
+
 jobs:
 - name: hi
   plan:

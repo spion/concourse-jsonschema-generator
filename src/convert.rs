@@ -189,8 +189,9 @@ pub fn text_to_markdown(nodes: &Vec<LitNode>) -> String {
 pub fn clean_text(text: &str) -> String {
   text
     .lines()
-    .map(|t| t.trim()) // Do not trim beginning of first and end of last
-    .map(|t| if t == "" { "\n\n" } else { t })
+    // TODO: Do not trim beginning of first and end of last
+    .map(|t| " ".to_string() + t.trim() + " ")
+    .map(|t| if t == "" { "\n\n".to_string() } else { t })
     .collect()
 }
 
