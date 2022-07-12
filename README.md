@@ -11,7 +11,8 @@ You can regenerate the schema by passing it the contents of the [concourse docs 
 
 ```
 cargo build --release
-./target/release/concourse-jsonschema-generator path/to/concourse/docs/lit/docs/**/*.lit | jq > schema.json
+./target/release/concourse-jsonschema-generator \
+  path/to/concourse/docs/lit/docs/**/*.lit | jq > schema.json
 ```
 
 You can also use the pre-generated shema from this repo directly.
