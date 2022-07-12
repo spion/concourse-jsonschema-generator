@@ -11,3 +11,5 @@ jobs:
 - name: hi
   plan:
   - get: x
+    trigger: true
+

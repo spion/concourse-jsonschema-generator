@@ -159,7 +159,7 @@ pub fn text_to_markdown(nodes: &Vec<LitNode>) -> String {
       LitNode::Text(t) => clean_text(t),
       LitNode::Fn(example_fn, args) if (example_fn == "example-toggle") => {
         format!(
-          "@example {}\n{}",
+          "\n@example {}\n{}",
           text_to_markdown(&args[0]),
           text_to_markdown(&args[1])
         )
