@@ -3,6 +3,8 @@ use std::collections::HashMap;
 #[derive(Debug, PartialEq, Eq)]
 pub struct Schema {
   pub schema_name: String,
+  pub part_of_group: bool,
+  pub group_members: Vec<String>,
   pub properties: HashMap<String, Property>,
 }
 #[derive(Debug, PartialEq, Eq, Hash)]

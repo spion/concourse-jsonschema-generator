@@ -3,3 +3,9 @@
 resource_types:
   - name: git
     type: git
+
+jobs:
+- name: hi
+  plan:
+  - get: x
+

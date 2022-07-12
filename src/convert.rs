@@ -5,11 +5,21 @@ pub fn transform_to_jsonschemas(doc: &LitDocument) -> Vec<Schema> {
   doc
     .iter()
     .flat_map(|node| {
+      let mut group_members: Vec<String> = vec![];
+
       match node {
         LitNode::Text(_) => vec![],
         // TODO: collect text here
         LitNode::Fn(schema, args) if (schema == "schema") || (schema == "schema-group") => {
           let mut found_schemas: Vec<Schema> = vec![];
+
+          let schema_name = text_to_markdown(&args[0])
+            .replace("`", "_")
+            .replace("-", "_")
+            .replace(" ", "_")
+            .replace("__", "_")
+            .trim_start_matches("_")
+            .to_string();
 
           let props = (if schema == "schema" {
             &args[1]
@@ -30,7 +40,8 @@ pub fn transform_to_jsonschemas(doc: &LitDocument) -> Vec<Schema> {
 
               let documentation = &args[2];
 
-              found_schemas.extend(transform_to_jsonschemas(documentation));
+              let inner_schemas = transform_to_jsonschemas(documentation);
+              found_schemas.extend(inner_schemas);
 
               let prop_name = text_to_markdown(&args[0]).trim().to_string();
 
@@ -45,12 +56,20 @@ pub fn transform_to_jsonschemas(doc: &LitDocument) -> Vec<Schema> {
               )]
             }
             LitNode::Fn(_other_fn, args) => {
-              found_schemas.extend(
-                args
-                  .into_iter()
-                  .flat_map(transform_to_jsonschemas)
+              let inner_schemas = args
+                .into_iter()
+                .flat_map(transform_to_jsonschemas)
+                .collect::<Vec<_>>();
+
+              group_members.extend(
+                inner_schemas
+                  .iter()
+                  .filter(|s| s.part_of_group)
+                  .map(|s| s.schema_name.clone())
                   .collect::<Vec<_>>(),
               );
+
+              found_schemas.extend(inner_schemas);
 
               vec![]
             }
@@ -59,14 +78,10 @@ pub fn transform_to_jsonschemas(doc: &LitDocument) -> Vec<Schema> {
           .collect();
 
           found_schemas.push(Schema {
-            schema_name: //snake_to_pascal(
-              text_to_markdown(&args[0])
-                .replace("`", "_")
-                .replace("-", "_")
-                .replace(" ", "_")
-                .replace("__", "_")
-                .trim_start_matches("_").to_string(),
-            //),
+            part_of_group: schema == "schema-group",
+            group_members: group_members,
+            schema_name: schema_name, //snake_to_pascal(
+
             properties: props,
           });
 
