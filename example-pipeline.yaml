@@ -1,15 +1,1976 @@
 # yaml-language-server: $schema=./schema.json
+display:
+  background_image: https://storage.googleapis.com/concourse-media-assets/concourse-emi-background-clean.png
 
 resource_types:
-  - name: git
-    type: git
+- name: gcs
+  type: registry-image
+  source: {repository: frodenas/gcs-resource}
 
-resources:
-- type: a
+- name: bosh-release
+  type: registry-image
+  source: {repository: dpb587/bosh-release-resource}
+
+- name: bosh-deployment
+  type: registry-image
+  source: {repository: cloudfoundry/bosh-deployment-resource}
+
+- name: slack-notifier
+  type: registry-image
+  source: {repository: mockersf/concourse-slack-notifier}
+
+- name: helm-chart
+  type: registry-image
+  source: {repository: linkyard/helm-chart-resource, tag: 2.17.0}
+
+# TODO: get rid of this v1.6.4 is deployed in CI
+- name: github-release
+  type: registry-image
+  source: {repository: concourse/github-release-resource}
+
+groups:
+- name: develop
+  jobs:
+  - unit
+  - dev-image
+  - integration
+  - testflight
+  - worker-runtime
+  - watsjs
+  - build-concourse
+  - build-image
+  - bin-smoke
+  - bin-smoke-lts
+  - check-docker-mounts
+  - bump-prod-*
+
+- name: quickstart
+  jobs:
+  - quickstart-smoke
+
+- name: k8s
+  jobs:
+  - k8s-*
+
+- name: bosh
+  jobs:
+  - bosh-*
+
+- name: images
+  jobs:
+  - resource-types-images
+  - unit-image
+  - build-golang-builder-image
+
+- name: all
+  jobs:
+  - "*"
 
 jobs:
-- name: hi
+- name: unit-image
+  public: true
+  serial: true
   plan:
-  - get: x
-    trigger: true
+  - in_parallel:
+    - get: ci
+      resource: ci-unit-image
+      trigger: true
+    - get: oci-build-task
+    - get: golang-builder-image
+      trigger: true
+      params: {format: oci}
+  - task: build
+    image: oci-build-task
+    privileged: true
+    config:
+      platform: linux
+      params:
+        CONTEXT: ci/dockerfiles/unit
+        IMAGE_ARG_base_image: golang-builder-image/image.tar
+      inputs: [{name: ci}, {name: golang-builder-image}]
+      outputs: [{name: image}]
+      caches: [{path: cache}]
+      run: {path: build}
+  - put: unit-image
+    params: {image: image/image.tar}
+  on_failure: &failed-ci
+    put: notify
+    params:
+      mode: normal
+      alert_type: failed
 
+- name: build-golang-builder-image
+  public: true
+  serial: true
+  plan:
+  - in_parallel:
+    - get: ci
+    - get: oci-build-task
+    - get: golang-linux
+      trigger: true
+    - get: ubuntu-bionic
+      trigger: true
+      params: {format: oci}
+  - task: build
+    image: oci-build-task
+    privileged: true
+    file: ci/tasks/build-golang-builder-image.yml
+    input_mapping: {base-image: ubuntu-bionic}
+  - load_var: version
+    file: golang-linux/version
+  - in_parallel:
+    - put: golang-builder-image
+      params:
+        image: image/image.tar
+        version: ((.:version))
+        bump_aliases: true
+
+    # push to latest (+ bare semver tags) to make local dev a bit easier
+    - put: golang-builder-image-latest
+      params:
+        image: image/image.tar
+        version: ((.:version))
+        bump_aliases: true
+  on_failure: *failed-ci
+
+- name: unit
+  public: true
+  serial: true
+  plan:
+  - in_parallel:
+    - get: concourse
+      trigger: true
+    - get: unit-image
+      trigger: true
+    - get: ci
+  - task: yarn-test
+    image: unit-image
+    file: ci/tasks/yarn-test.yml
+  - timeout: 1h
+    in_parallel:
+    - task: unit
+      image: unit-image
+      file: ci/tasks/unit.yml
+      input_mapping: {concourse: built-concourse}
+    - task: fly-darwin
+      file: ci/tasks/fly-darwin.yml
+    - task: fly-windows
+      file: ci/tasks/fly-windows.yml
+    - task: unit-baggageclaim
+      image: unit-image
+      file: ci/tasks/unit-baggageclaim.yml
+      privileged: true
+      input_mapping: {concourse: built-concourse}
+    - task: unit-baggageclaim-darwin
+      file: ci/tasks/unit-baggageclaim-darwin.yml
+      input_mapping: {concourse: built-concourse}
+    - task: unit-baggageclaim-windows
+      file: ci/tasks/unit-baggageclaim-windows.yml
+      input_mapping: {concourse: built-concourse}
+  on_failure: &failed-concourse
+    put: notify
+    params:
+      mode: normal
+      alert_type: failed
+
+- name: resource-types-images
+  public: true
+  serial: true
+  plan:
+  - in_parallel:
+    - get: oci-build-task
+    - get: ci
+  - in_parallel:
+    - do:
+      - in_parallel:
+        - get: bosh-io-release-resource-alpine
+          trigger: true
+        - get: bosh-io-stemcell-resource-alpine
+          trigger: true
+        - get: cf-resource-alpine
+          trigger: true
+        - get: docker-image-resource-alpine
+          trigger: true
+        - get: git-resource-alpine
+          trigger: true
+        - get: github-release-resource-alpine
+          trigger: true
+        - get: hg-resource-alpine
+          trigger: true
+        - get: mock-resource-alpine
+          trigger: true
+        - get: pool-resource-alpine
+          trigger: true
+        - get: registry-image-resource-alpine
+          trigger: true
+        - get: s3-resource-alpine
+          trigger: true
+        - get: semver-resource-alpine
+          trigger: true
+        - get: time-resource-alpine
+          trigger: true
+        - get: tracker-resource-alpine
+          trigger: true
+      - task: build-alpine
+        input_mapping:
+          bosh-io-release-resource: bosh-io-release-resource-alpine
+          bosh-io-stemcell-resource: bosh-io-stemcell-resource-alpine
+          cf-resource: cf-resource-alpine
+          docker-image-resource: docker-image-resource-alpine
+          git-resource: git-resource-alpine
+          github-release-resource: github-release-resource-alpine
+          hg-resource: hg-resource-alpine
+          mock-resource: mock-resource-alpine
+          pool-resource: pool-resource-alpine
+          registry-image-resource: registry-image-resource-alpine
+          s3-resource: s3-resource-alpine
+          semver-resource: semver-resource-alpine
+          time-resource: time-resource-alpine
+          tracker-resource: tracker-resource-alpine
+        output_mapping: {image: image_alpine}
+        image: oci-build-task
+        privileged: true
+        file: ci/tasks/build-resource-types-image.yml
+    - do:
+      - in_parallel:
+        - get: bosh-io-release-resource-ubuntu
+          trigger: true
+        - get: bosh-io-stemcell-resource-ubuntu
+          trigger: true
+        - get: cf-resource-ubuntu
+          trigger: true
+        - get: docker-image-resource-ubuntu
+          trigger: true
+        - get: git-resource-ubuntu
+          trigger: true
+        - get: github-release-resource-ubuntu
+          trigger: true
+        - get: hg-resource-ubuntu
+          trigger: true
+        - get: mock-resource-ubuntu
+          trigger: true
+        - get: pool-resource-ubuntu
+          trigger: true
+        - get: registry-image-resource-ubuntu
+          trigger: true
+        - get: s3-resource-ubuntu
+          trigger: true
+        - get: semver-resource-ubuntu
+          trigger: true
+        - get: time-resource-ubuntu
+          trigger: true
+        - get: tracker-resource-ubuntu
+          trigger: true
+      - task: build-ubuntu
+        input_mapping:
+          bosh-io-release-resource: bosh-io-release-resource-ubuntu
+          bosh-io-stemcell-resource: bosh-io-stemcell-resource-ubuntu
+          cf-resource: cf-resource-ubuntu
+          docker-image-resource: docker-image-resource-ubuntu
+          git-resource: git-resource-ubuntu
+          github-release-resource: github-release-resource-ubuntu
+          hg-resource: hg-resource-ubuntu
+          mock-resource: mock-resource-ubuntu
+          pool-resource: pool-resource-ubuntu
+          registry-image-resource: registry-image-resource-ubuntu
+          s3-resource: s3-resource-ubuntu
+          semver-resource: semver-resource-ubuntu
+          time-resource: time-resource-ubuntu
+          tracker-resource: tracker-resource-ubuntu
+        output_mapping: {image: image_ubuntu}
+        image: oci-build-task
+        privileged: true
+        file: ci/tasks/build-resource-types-image.yml
+  - in_parallel:
+    - put: resource-types-alpine-image
+      params: {image: image_alpine/image.tar}
+      get_params: {format: oci}
+    - put: resource-types-ubuntu-image
+      params: {image: image_ubuntu/image.tar}
+      get_params: {format: oci}
+
+- name: dev-image
+  public: true
+  serial: true
+  plan:
+  - in_parallel:
+      fail_fast: true
+      steps:
+      - get: concourse
+        trigger: true
+      - get: golang-builder-image
+        trigger: true
+        params: {format: oci}
+      - get: golang-builder-image-rootfs
+        resource: golang-builder-image
+        trigger: true
+        params: {format: rootfs}
+      - get: gdn
+        trigger: true
+      - get: containerd
+        trigger: true
+      - get: runc
+        trigger: true
+      - get: cni
+        trigger: true
+      - get: dumb-init
+        trigger: true
+      - get: resource-types-alpine-image
+        passed: [resource-types-images]
+      - get: resource-types-ubuntu-image
+        passed: [resource-types-images]
+      - get: unit-image
+      - get: oci-build-task
+      - get: ci
+  - in_parallel:
+      fail_fast: true
+      steps:
+      - task: yarn-build
+        image: unit-image
+        file: ci/tasks/yarn-build.yml
+      - task: fly-linux
+        file: ci/tasks/fly-build-linux.yml
+        image: golang-builder-image-rootfs
+      - task: fly-windows
+        file: ci/tasks/fly-build-windows.yml
+      - task: fly-darwin
+        file: ci/tasks/fly-build-darwin.yml
+  - task: build
+    image: oci-build-task
+    privileged: true
+    input_mapping: {concourse: built-concourse, resource-types-image: resource-types-alpine-image}
+    file: ci/tasks/build-dev-image.yml
+  - put: dev-image
+    params: {image: image/image.tar}
+    get_params: {format: oci}
+  on_failure: *failed-concourse
+
+- name: worker-runtime
+  public: true
+  max_in_flight: 1
+  plan:
+  - in_parallel:
+    - get: concourse
+      passed: [unit, dev-image]
+      trigger: true
+    - get: dev-image
+      passed: [dev-image]
+      trigger: true
+    - get: ci
+  - task: integration
+    image: dev-image
+    privileged: true
+    timeout: 1h
+    file: ci/tasks/containerd-integration.yml
+  on_failure: *failed-concourse
+
+- name: check-docker-mounts
+  public: true
+  max_in_flight: 1
+  plan:
+    - get: concourse
+      passed: [unit, dev-image]
+      trigger: true
+    - get: unit-image
+    - get: ci
+    - task: docker-mounts
+      image: unit-image
+      privileged: true
+      file: ci/tasks/docker-mounts.yml
+
+- name: testflight
+  public: true
+  max_in_flight: 2
+  plan:
+  - in_parallel:
+    - get: concourse
+      passed: [unit, dev-image]
+      trigger: true
+    - get: unit-image
+    - get: dev-image
+      passed: [dev-image]
+      trigger: true
+      params: {format: oci}
+    - get: postgres-image
+      params: {format: oci}
+    - get: postgres-image-legacy
+      params: {format: oci}
+    - get: ci
+  - across:
+    - var: runtime
+      values:
+      - guardian
+      - containerd
+      max_in_flight: all
+    - var: postgres-image
+      values:
+      - postgres-image
+      - postgres-image-legacy
+      max_in_flight: all
+    task: testflight
+    image: unit-image
+    privileged: true
+    timeout: 1h
+    params:
+      RUNTIME: ((.:runtime))
+    file: ci/tasks/docker-compose-testflight.yml
+    input_mapping: {postgres-image: ((.:postgres-image))}
+  on_failure: *failed-concourse
+
+- name: watsjs
+  public: true
+  max_in_flight: 2
+  plan:
+  - in_parallel:
+    - get: concourse
+      passed: [unit, dev-image]
+      trigger: true
+    - get: unit-image
+    - get: dev-image
+      passed: [dev-image]
+      trigger: true
+      params: {format: oci}
+    - get: postgres-image
+      params: {format: oci}
+    - get: ci
+  - task: watsjs
+    image: unit-image
+    privileged: true
+    timeout: 1h
+    file: ci/tasks/docker-compose-watsjs.yml
+  on_failure: *failed-concourse
+
+- name: integration
+  public: true
+  serial: true
+  plan:
+  - in_parallel:
+    - get: concourse
+      passed: [unit, dev-image]
+      trigger: true
+    - get: dev-image
+      passed: [dev-image]
+      params: {format: oci}
+      trigger: true
+    - get: unit-image
+    - get: concourse-image
+      params: {format: oci}
+    - get: postgres-image
+      params: {format: oci}
+    - get: vault-image
+      params: {format: oci}
+    - get: ci
+  - task: integration
+    privileged: true
+    image: unit-image
+    file: ci/tasks/integration.yml
+  on_failure: *failed-concourse
+
+- name: k8s-smoke
+  public: true
+  serial: true
+  plan:
+  - in_parallel:
+    - get: concourse
+      passed: [build-image]
+      trigger: true
+    - get: concourse-dev-alpine-image
+      passed: [build-image]
+      params: {format: oci}
+      trigger: true
+    - get: concourse-dev-ubuntu-image
+      passed: [build-image]
+      params: {format: oci}
+      trigger: true
+    - get: concourse-chart
+      trigger: true
+    - get: unit-image
+    - get: ci
+  - try:
+      task: try-delete
+      image: unit-image
+      file: ci/tasks/k8s-delete.yml
+      params:
+        KUBE_CONFIG: ((k8s_topgun.kube_config))
+        SERVICE_ACCOUNT_KEY: ((k8s_topgun.service_account_key))
+        RELEASE_NAME: concourse-smoke
+        CONCOURSE_IMAGE: concourse/concourse-dev
+  - task: deploy
+    image: unit-image
+    input_mapping: {image-info: concourse-dev-alpine-image}
+    file: ci/tasks/k8s-deploy.yml
+    params:
+      KUBE_CONFIG: ((k8s_topgun.kube_config))
+      SERVICE_ACCOUNT_KEY: ((k8s_topgun.service_account_key))
+      RELEASE_NAME: concourse-smoke
+      CONCOURSE_IMAGE: concourse/concourse-dev
+  - task: k8s-smoke
+    image: unit-image
+    file: ci/tasks/k8s-smoke.yml
+    params:
+      KUBE_CONFIG: ((k8s_topgun.kube_config))
+      SERVICE_ACCOUNT_KEY: ((k8s_topgun.service_account_key))
+      RELEASE_NAME: concourse-smoke
+      MAX_TICKS: "180"
+  - task: delete
+    image: unit-image
+    file: ci/tasks/k8s-delete.yml
+    params:
+      KUBE_CONFIG: ((k8s_topgun.kube_config))
+      SERVICE_ACCOUNT_KEY: ((k8s_topgun.service_account_key))
+      RELEASE_NAME: concourse-smoke
+      CONCOURSE_IMAGE: concourse/concourse-dev
+  on_failure: *failed-concourse
+
+- name: k8s-topgun
+  public: true
+  serial: true
+  plan:
+  - in_parallel:
+    - get: concourse
+      passed: [k8s-smoke]
+      tags: [k8s-topgun]
+      trigger: true
+    - get: concourse-dev-alpine-image
+      params: {format: oci}
+      passed: [k8s-smoke]
+      tags: [k8s-topgun]
+      trigger: true
+    - get: concourse-dev-ubuntu-image
+      params: {format: oci}
+      passed: [k8s-smoke]
+      tags: [k8s-topgun]
+      trigger: true
+    - get: unit-image
+      tags: [k8s-topgun]
+    - get: concourse-chart
+      passed: [k8s-smoke]
+      tags: [k8s-topgun]
+      trigger: true
+    - get: prometheus-chart
+      tags: [k8s-topgun]
+      params: {untar: true}
+    - get: postgresql-chart
+      tags: [k8s-topgun]
+      params: {untar: true}
+    - get: ci
+      tags: [k8s-topgun]
+  - task: k8s-topgun
+    file: ci/tasks/k8s-topgun.yml
+    tags: [k8s-topgun]
+    image: unit-image
+    input_mapping: {concourse-rc-image: concourse-dev-alpine-image}
+    params:
+      IN_CLUSTER: "true"
+      KUBE_CONFIG: ((k8s_topgun.kube_config))
+      SERVICE_ACCOUNT_KEY: ((k8s_topgun.service_account_key))
+      CONCOURSE_IMAGE_NAME: concourse/concourse-dev
+  on_failure: *failed-concourse
+
+- name: k8s-check-helm-params
+  public: true
+  max_in_flight: 1
+  plan:
+  - in_parallel:
+    - get: concourse
+      passed: [build-image]
+      trigger: true
+    - get: concourse-dev-alpine-image
+      passed: [build-image]
+      trigger: true
+    - get: concourse-dev-ubuntu-image
+      passed: [build-image]
+      trigger: true
+    - get: linux-dev-ubuntu
+      passed: [build-image]
+      trigger: true
+    - get: unit-image
+    - get: concourse-chart
+      trigger: true
+    - get: ci
+  - task: check-params
+    file: ci/tasks/check-distribution-env.yml
+    image: unit-image
+    input_mapping: {distribution: concourse-chart, linux-rc: linux-dev-ubuntu}
+    params: {DISTRIBUTION: helm}
+  on_failure: *failed-concourse
+
+- name: build-concourse
+  old_name: build-rc
+  public: true
+  serial: true
+  plan:
+  - in_parallel:
+    - get: concourse
+      passed: [dev-image, testflight, watsjs, integration, worker-runtime]
+      trigger: true
+    - get: unit-image
+      passed: [dev-image]
+    - get: dev-image
+      passed: [dev-image]
+      trigger: true
+    - get: golang-builder-image
+      passed: [dev-image]
+    - get: ci
+    - get: resource-types-alpine-image
+      passed: [dev-image]
+    - get: resource-types-ubuntu-image
+      passed: [dev-image]
+  - in_parallel:
+    - task: fly-linux
+      file: ci/tasks/fly-build-linux.yml
+      image: golang-builder-image
+    - task: fly-windows
+      file: ci/tasks/fly-build-windows.yml
+    - task: fly-darwin
+      file: ci/tasks/fly-build-darwin.yml
+  - in_parallel:
+      fail_fast: true
+      steps:
+        - task: hoist-linux-dependencies
+          file: ci/tasks/hoist-linux-dependencies.yml
+          image: dev-image
+        - task: hoist-resource-types-alpine
+          file: ci/tasks/hoist-linux-resource-types.yml
+          image: resource-types-alpine-image
+          output_mapping: {resource-types: resource-types-alpine}
+        - task: hoist-resource-types-ubuntu
+          file: ci/tasks/hoist-linux-resource-types.yml
+          image: resource-types-ubuntu-image
+          output_mapping: {resource-types: resource-types-ubuntu}
+        - task: yarn-build
+          file: ci/tasks/yarn-build.yml
+          image: unit-image
+  - task: get-dev-version
+    file: ci/tasks/get-dev-version.yml
+    image: golang-builder-image
+  - in_parallel:
+      fail_fast: true
+      steps:
+      - task: concourse-linux-alpine
+        file: ci/tasks/concourse-build-linux.yml
+        image: golang-builder-image
+        params: {PLATFORM: linux}
+        input_mapping: {concourse: built-concourse, resource-types: resource-types-alpine}
+        output_mapping: {concourse-tarball: concourse-linux-alpine}
+      - task: concourse-linux-ubuntu
+        image: golang-builder-image
+        params: {PLATFORM: linux}
+        file: ci/tasks/concourse-build-linux.yml
+        input_mapping: {concourse: built-concourse, resource-types: resource-types-ubuntu}
+        output_mapping: {concourse-tarball: concourse-linux-ubuntu}
+      - task: concourse-windows
+        file: ci/tasks/concourse-build-windows.yml
+        input_mapping: {concourse: built-concourse}
+      - task: concourse-darwin
+        file: ci/tasks/concourse-build-darwin.yml
+        input_mapping: {concourse: built-concourse}
+        output_mapping: {concourse-tarball: concourse-darwin}
+  - in_parallel:
+    - put: linux-dev-alpine
+      params: {file: concourse-linux-alpine/concourse-*.tgz}
+      inputs: [concourse-linux-alpine]
+    - put: linux-dev-ubuntu
+      params: {file: concourse-linux-ubuntu/concourse-*.tgz}
+      inputs: [concourse-linux-ubuntu]
+    - put: windows-dev
+      params: {file: concourse-windows/concourse-*.zip}
+      inputs: [concourse-windows]
+    - put: darwin-dev
+      params: {file: concourse-darwin/concourse-*.tgz}
+      inputs: [concourse-darwin]
+  on_failure: *failed-concourse
+
+- name: build-image
+  old_name: build-rc-image
+  public: true
+  serial: true
+  plan:
+  - in_parallel:
+    - get: concourse
+      passed: [build-concourse]
+      trigger: true
+    - get: unit-image
+    - get: linux-dev-alpine
+      trigger: true
+      passed: [build-concourse]
+    - get: linux-dev-ubuntu
+      trigger: true
+      passed: [build-concourse]
+    - get: concourse-docker
+      trigger: true
+    - get: oci-build-task
+    - get: ci
+  - in_parallel:
+      fail_fast: true
+      steps:
+        - task: build-alpine
+          file: concourse-docker/ci/build-image.yml
+          image: oci-build-task
+          input_mapping: {linux-rc: linux-dev-alpine}
+          output_mapping: {image: image-alpine}
+          privileged: true
+        - task: build-ubuntu
+          file: concourse-docker/ci/build-image.yml
+          image: oci-build-task
+          input_mapping: {linux-rc: linux-dev-ubuntu}
+          output_mapping: {image: image-ubuntu}
+          privileged: true
+  - in_parallel:
+      fail_fast: true
+      steps:
+        - put: concourse-dev-alpine-image
+          inputs: [image-alpine]
+          params:
+            image: image-alpine/image.tar
+        - put: concourse-dev-ubuntu-image
+          inputs: [image-ubuntu]
+          params:
+            image: image-ubuntu/image.tar
+  on_failure: *failed-concourse
+
+- name: bump-prod-web
+  public: true
+  serial: true
+  plan:
+  - in_parallel:
+    - get: infrastructure
+    - get: concourse-image
+      resource: concourse-dev-alpine-image
+      passed: [build-image]
+      params: {skip_download: true}
+  - load_var: concourse_image_repo
+    file: concourse-image/repository
+  - load_var: concourse_image_digest
+    file: concourse-image/digest
+  - task: bump-versions
+    file: infrastructure/tasks/patch-yaml.yml
+    input_mapping: {repo: infrastructure}
+    output_mapping: {repo-bumped: infrastructure-bumped}
+    params:
+      FILE: terraform/environments/production/variables.yml
+      PATCH:
+        concourse_web_image_repo: ((.:concourse_image_repo))
+        concourse_web_image_digest: ((.:concourse_image_digest))
+      COMMIT: bump production web to concourse dev
+  - put: infrastructure-bump
+    inputs: [infrastructure-bumped]
+    params:
+      repository: infrastructure-bumped
+      branch: master
+  on_failure: *failed-concourse
+
+- name: bump-prod-workers
+  public: true
+  serial: true
+  plan:
+  - in_parallel:
+    - get: infrastructure
+    - get: concourse-image
+      resource: concourse-dev-alpine-image
+      passed: [build-image]
+      params: {skip_download: true}
+    - get: windows-dev
+      passed: [build-concourse]
+      params: {skip_download: "true"}
+    - get: darwin-dev
+      passed: [build-concourse]
+      params: {skip_download: "true"}
+  - load_var: concourse_image_repo
+    file: concourse-image/repository
+  - load_var: concourse_image_digest
+    file: concourse-image/digest
+  - task: convert-windows-url
+    file: infrastructure/tasks/convert-gs-url.yml
+    input_mapping: {input: windows-dev}
+    output_mapping: {output: windows}
+  - task: convert-darwin-url
+    file: infrastructure/tasks/convert-gs-url.yml
+    input_mapping: {input: darwin-dev}
+    output_mapping: {output: darwin}
+  - load_var: concourse_windows_bundle_url
+    file: windows/url
+  - load_var: concourse_darwin_bundle_url
+    file: darwin/url
+  - task: bump-versions
+    file: infrastructure/tasks/patch-yaml.yml
+    input_mapping: {repo: infrastructure}
+    output_mapping: {repo-bumped: infrastructure-bumped}
+    params:
+      FILE: terraform/environments/production/variables.yml
+      PATCH:
+        concourse_worker_image_repo: ((.:concourse_image_repo))
+        concourse_worker_image_digest: ((.:concourse_image_digest))
+        concourse_windows_bundle_url: ((.:concourse_windows_bundle_url))
+        concourse_darwin_bundle_url: ((.:concourse_darwin_bundle_url))
+      COMMIT: bump production workers to concourse dev
+  - put: infrastructure-bump
+    inputs: [infrastructure-bumped]
+    params:
+      repository: infrastructure-bumped
+      branch: master
+  on_failure: *failed-concourse
+
+- name: bin-smoke
+  public: true
+  serial: true
+  plan:
+  - in_parallel:
+    - get: concourse
+      passed: [build-concourse]
+      trigger: true
+    - get: linux-dev-ubuntu
+      passed: [build-concourse]
+      trigger: true
+    - get: unit-image
+    - get: ci
+  - across:
+    - var: runtime
+      values:
+      - guardian
+      - containerd
+      max_in_flight: all
+    do:
+    - task: terraform-smoke
+      image: unit-image
+      file: ci/tasks/terraform-smoke.yml
+      input_mapping: {linux-rc: linux-dev-ubuntu}
+      params:
+        GCP_PROJECT: cf-concourse-production
+        GCP_KEY: ((concourse_smoke_gcp_key))
+        SSH_KEY: ((concourse_smoke_ssh_key))
+        WORKSPACE: bin-smoke-((.:runtime))
+        TF_VAR_RUNTIME: ((.:runtime))
+    - task: smoke
+      image: unit-image
+      file: ci/tasks/smoke.yml
+      input_mapping: {endpoint-info: outputs}
+    timeout: 20m
+  on_failure: *failed-concourse
+
+- name: bin-smoke-lts
+  public: true
+  serial: true
+  plan:
+  - in_parallel:
+    - get: concourse
+      passed: [build-concourse]
+      trigger: true
+    - get: linux-dev-ubuntu
+      passed: [build-concourse]
+      trigger: true
+    - get: unit-image
+    - get: ci
+  - across:
+    - var: runtime
+      values:
+      - guardian
+      - containerd
+      max_in_flight: all
+    - var: gcp-image
+      values:
+      - debian-10-buster-v20210122
+      - ubuntu-1804-lts
+      - ubuntu-2004-lts
+      max_in_flight: 1
+    do:
+    - task: terraform-smoke
+      image: unit-image
+      file: ci/tasks/terraform-smoke.yml
+      input_mapping: {linux-rc: linux-dev-ubuntu}
+      params:
+        GCP_PROJECT: cf-concourse-production
+        GCP_KEY: ((concourse_smoke_gcp_key))
+        SSH_KEY: ((concourse_smoke_ssh_key))
+        WORKSPACE: bin-smoke-lts-((.:runtime))
+        TF_VAR_GCP_IMAGE: ((.:gcp-image))
+        TF_VAR_RUNTIME: ((.:runtime))
+    - task: smoke
+      image: unit-image
+      file: ci/tasks/smoke.yml
+      input_mapping: {endpoint-info: outputs}
+    timeout: 20m
+  on_failure: *failed-concourse
+
+- name: quickstart-smoke
+  public: true
+  serial: true
+  plan:
+  - in_parallel:
+    - get: concourse
+      passed: [build-image]
+      trigger: true
+    - get: concourse-dev-alpine-image
+      passed: [build-image]
+      params: {format: oci}
+      trigger: true
+    - get: unit-image
+    - get: ci
+    - get: docs
+  - task: quickstart-smoke
+    privileged: true
+    image: unit-image
+    file: ci/tasks/quickstart-smoke.yml
+    input_mapping: {concourse-rc-image: concourse-dev-alpine-image}
+    params:
+      RELEASE_NAME: concourse-smoke
+  on_failure: *failed-concourse
+
+- name: bosh-check-props
+  public: true
+  max_in_flight: 1
+  plan:
+  - in_parallel:
+    - get: concourse
+      passed: [bin-smoke]
+      trigger: true
+    - get: unit-image
+    - get: linux-dev-ubuntu
+      passed: [bin-smoke]
+      trigger: true
+    - get: concourse-release-repo
+      trigger: true
+    - get: ci
+  - task: check-props
+    file: ci/tasks/check-distribution-env.yml
+    image: unit-image
+    input_mapping: {distribution: concourse-release-repo, linux-rc: linux-dev-ubuntu}
+    params: {DISTRIBUTION: bosh}
+  on_failure: *failed-concourse
+
+- name: bosh-bump
+  public: true
+  serial: true
+  plan:
+  - in_parallel:
+    - get: concourse
+      passed: [build-concourse]
+      trigger: true
+    - get: unit-image
+    - get: linux-dev-ubuntu
+      passed: [build-concourse]
+      trigger: true
+    - get: windows-dev
+      passed: [build-concourse]
+      trigger: true
+    - get: concourse-release-repo
+    - get: ci
+  - task: bump-concourse-blobs
+    file: ci/tasks/bump-concourse-blobs.yml
+    image: unit-image
+    input_mapping: { linux-rc: linux-dev-ubuntu, windows-rc: windows-dev }
+    params: {GCP_JSON_KEY: ((concourse_artifacts_json_key))}
+  - put: concourse-release-repo
+    params: {repository: bumped-concourse-release-repo}
+
+- name: bosh-upload-releases
+  public: true
+  serial: true
+  plan:
+  - in_parallel:
+    # these don't trigger, to ensure that the job gets triggered by
+    # concourse-release, which is unfortunately decoupled from the resource
+    # that we 'put' to.
+    - get: concourse
+      passed: [bosh-bump]
+    - get: unit-image
+    - get: concourse-release
+      trigger: true
+    - get: postgres-release
+      trigger: true
+    - get: bpm-release
+      trigger: true
+    - get: gcp-bionic-stemcell
+      trigger: true
+    - get: bbr-sdk-release
+      trigger: true
+    - get: vault-release
+      trigger: true
+    - get: credhub-release
+      trigger: true
+    - get: uaa-release
+      trigger: true
+    - get: bbr
+      trigger: true
+    - get: ci
+  - task: upload-releases
+    tags: [bosh]
+    file: ci/tasks/upload-releases.yml
+    image: unit-image
+    params:
+      BOSH_ENVIRONMENT: https://10.0.0.6:25555
+      BOSH_CA_CERT: ((testing_bosh_ca_cert))
+      BOSH_CLIENT: ((testing_bosh_client.id))
+      BOSH_CLIENT_SECRET: ((testing_bosh_client.secret))
+
+- name: bosh-smoke-containerd
+  public: true
+  serial: true
+  plan:
+  - in_parallel:
+    # these don't trigger, to ensure that the job gets triggered by
+    # concourse-release, which is unfortunately decoupled from the resource
+    # that we 'put' to.
+    - get: concourse
+      passed: [bosh-upload-releases]
+    - get: unit-image
+      passed: [bosh-upload-releases]
+    - get: concourse-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: postgres-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: bpm-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: gcp-bionic-stemcell
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: ci
+  - put: smoke-deployment
+    tags: [bosh]
+    params:
+      recreate: true
+      manifest: ci/deployments/bosh-smoke.yml
+      ops_files:
+      - ci/deployments/bosh-operations/runtime-containerd.yml
+      releases:
+      - concourse-release/*.tgz
+      - postgres-release/*.tgz
+      - bpm-release/*.tgz
+      stemcells:
+      - gcp-bionic-stemcell/*.tgz
+      vars:
+        deployment_name: concourse-smoke
+        stemcell_variant: bionic
+  - task: discover-bosh-endpoint-info
+    tags: [bosh]
+    file: ci/tasks/discover-bosh-endpoint-info.yml
+    image: unit-image
+    params:
+      BOSH_ENVIRONMENT: https://10.0.0.6:25555
+      BOSH_CA_CERT: ((testing_bosh_ca_cert))
+      BOSH_CLIENT: ((testing_bosh_client.id))
+      BOSH_CLIENT_SECRET: ((testing_bosh_client.secret))
+      BOSH_DEPLOYMENT: concourse-smoke
+      BOSH_INSTANCE_GROUP: concourse
+  - task: smoke
+    tags: [bosh]
+    image: unit-image
+    file: ci/tasks/smoke.yml
+    timeout: 1h
+  on_failure: *failed-concourse
+
+- name: bosh-smoke-guardian
+  public: true
+  serial: true
+  plan:
+  - in_parallel:
+    # these don't trigger, to ensure that the job gets triggered by
+    # concourse-release, which is unfortunately decoupled from the resource
+    # that we 'put' to.
+    - get: concourse
+      passed: [bosh-upload-releases]
+    - get: unit-image
+      passed: [bosh-upload-releases]
+    - get: concourse-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: postgres-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: bpm-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: gcp-bionic-stemcell
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: ci
+  - put: smoke-deployment-guardian
+    tags: [bosh]
+    params:
+      recreate: true
+      manifest: ci/deployments/bosh-smoke.yml
+      ops_files:
+      - ci/deployments/bosh-operations/runtime-guardian.yml
+      releases:
+      - concourse-release/*.tgz
+      - postgres-release/*.tgz
+      - bpm-release/*.tgz
+      stemcells:
+      - gcp-bionic-stemcell/*.tgz
+      vars:
+        deployment_name: concourse-smoke-guardian
+        stemcell_variant: bionic
+  - task: discover-bosh-endpoint-info
+    tags: [bosh]
+    file: ci/tasks/discover-bosh-endpoint-info.yml
+    image: unit-image
+    params:
+      BOSH_ENVIRONMENT: https://10.0.0.6:25555
+      BOSH_CA_CERT: ((testing_bosh_ca_cert))
+      BOSH_CLIENT: ((testing_bosh_client.id))
+      BOSH_CLIENT_SECRET: ((testing_bosh_client.secret))
+      BOSH_DEPLOYMENT: concourse-smoke-guardian
+      BOSH_INSTANCE_GROUP: concourse
+  - task: smoke
+    tags: [bosh]
+    image: unit-image
+    file: ci/tasks/smoke.yml
+    timeout: 1h
+  on_failure: *failed-concourse
+
+- name: bosh-topgun-core
+  public: true
+  serial: true
+  interruptible: true
+  plan:
+  - in_parallel:
+    # these don't trigger, to ensure that the job gets triggered by
+    # concourse-release, which is unfortunately decoupled from the resource
+    # that we 'put' to.
+    - get: concourse
+      passed: [bosh-upload-releases]
+    - get: unit-image
+      passed: [bosh-upload-releases]
+    - get: concourse-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: postgres-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: bpm-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: bbr-sdk-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: gcp-bionic-stemcell
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: vault-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: credhub-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: uaa-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: bbr
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: ci
+  - task: bosh-topgun
+    tags: [bosh]
+    file: ci/tasks/topgun.yml
+    image: unit-image
+    input_mapping:
+      stemcell: gcp-bionic-stemcell
+    params:
+      BOSH_ENVIRONMENT: https://10.0.0.6:25555
+      BOSH_CA_CERT: ((testing_bosh_ca_cert))
+      BOSH_CLIENT: ((testing_bosh_client.id))
+      BOSH_CLIENT_SECRET: ((testing_bosh_client.secret))
+      # AWS_REGION: ((topgun_aws_ssm.region))
+      # AWS_ACCESS_KEY_ID: ((topgun_aws_ssm.access_key_id))
+      # AWS_SECRET_ACCESS_KEY: ((topgun_aws_ssm.secret_access_key))
+      SUITE: core
+  on_failure: *failed-concourse
+
+- name: bosh-topgun-runtime
+  public: true
+  serial: true
+  interruptible: true
+  plan:
+  - in_parallel:
+    # these don't trigger, to ensure that the job gets triggered by
+    # concourse-release, which is unfortunately decoupled from the resource
+    # that we 'put' to.
+    - get: concourse
+      passed: [bosh-upload-releases]
+    - get: unit-image
+      passed: [bosh-upload-releases]
+    - get: concourse-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: postgres-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: bpm-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: bbr-sdk-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: gcp-bionic-stemcell
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: vault-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: credhub-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: uaa-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: bbr
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: ci
+  - task: bosh-topgun
+    tags: [bosh]
+    file: ci/tasks/topgun.yml
+    image: unit-image
+    input_mapping:
+      stemcell: gcp-bionic-stemcell
+    params:
+      BOSH_ENVIRONMENT: https://10.0.0.6:25555
+      BOSH_CA_CERT: ((testing_bosh_ca_cert))
+      BOSH_CLIENT: ((testing_bosh_client.id))
+      BOSH_CLIENT_SECRET: ((testing_bosh_client.secret))
+      # AWS_REGION: ((topgun_aws_ssm.region))
+      # AWS_ACCESS_KEY_ID: ((topgun_aws_ssm.access_key_id))
+      # AWS_SECRET_ACCESS_KEY: ((topgun_aws_ssm.secret_access_key))
+      SUITE: runtime
+  on_failure: *failed-concourse
+
+- name: bosh-topgun-both
+  public: true
+  serial: true
+  interruptible: true
+  plan:
+  - in_parallel:
+    # these don't trigger, to ensure that the job gets triggered by
+    # concourse-release, which is unfortunately decoupled from the resource
+    # that we 'put' to.
+    - get: concourse
+      passed: [bosh-upload-releases]
+    - get: unit-image
+      passed: [bosh-upload-releases]
+    - get: concourse-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: postgres-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: bpm-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: bbr-sdk-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: gcp-bionic-stemcell
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: vault-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: credhub-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: uaa-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: bbr
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: ci
+  - task: bosh-topgun
+    tags: [bosh]
+    file: ci/tasks/topgun.yml
+    image: unit-image
+    input_mapping:
+      stemcell: gcp-bionic-stemcell
+    params:
+      BOSH_ENVIRONMENT: https://10.0.0.6:25555
+      BOSH_CA_CERT: ((testing_bosh_ca_cert))
+      BOSH_CLIENT: ((testing_bosh_client.id))
+      BOSH_CLIENT_SECRET: ((testing_bosh_client.secret))
+      # AWS_REGION: ((topgun_aws_ssm.region))
+      # AWS_ACCESS_KEY_ID: ((topgun_aws_ssm.access_key_id))
+      # AWS_SECRET_ACCESS_KEY: ((topgun_aws_ssm.secret_access_key))
+      SUITE: both
+  on_failure: *failed-concourse
+
+- name: bosh-topgun-pcf
+  public: true
+  serial: true
+  interruptible: true
+  plan:
+  - in_parallel:
+    # these don't trigger, to ensure that the job gets triggered by
+    # concourse-release, which is unfortunately decoupled from the resource
+    # that we 'put' to.
+    - get: concourse
+      passed: [bosh-upload-releases]
+    - get: unit-image
+      passed: [bosh-upload-releases]
+    - get: concourse-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: postgres-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: bpm-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: bbr-sdk-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: gcp-bionic-stemcell
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: vault-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: credhub-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: uaa-release
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: bbr
+      passed: [bosh-upload-releases]
+      trigger: true
+    - get: ci
+  - task: bosh-topgun
+    tags: [bosh]
+    file: ci/tasks/topgun.yml
+    image: unit-image
+    input_mapping:
+      stemcell: gcp-bionic-stemcell
+    params:
+      BOSH_ENVIRONMENT: https://10.0.0.6:25555
+      BOSH_CA_CERT: ((testing_bosh_ca_cert))
+      BOSH_CLIENT: ((testing_bosh_client.id))
+      BOSH_CLIENT_SECRET: ((testing_bosh_client.secret))
+      # AWS_REGION: ((topgun_aws_ssm.region))
+      # AWS_ACCESS_KEY_ID: ((topgun_aws_ssm.access_key_id))
+      # AWS_SECRET_ACCESS_KEY: ((topgun_aws_ssm.secret_access_key))
+      SUITE: pcf
+  on_failure: *failed-concourse
+
+resources:
+- name: concourse
+  type: git
+  icon: &git-icon github
+  source:
+    uri: https://github.com/concourse/concourse.git
+    branch: master
+
+- name: ci
+  type: git
+  icon: *git-icon
+  source:
+    uri: https://github.com/concourse/ci.git
+    branch: master
+
+- name: ci-unit-image
+  type: git
+  icon: *git-icon
+  source:
+    uri: https://github.com/concourse/ci.git
+    branch: master
+    paths:
+    - dockerfiles/unit
+
+- name: infrastructure
+  type: git
+  icon: github
+  source:
+    uri: git@github.com:concourse/infrastructure.git
+    private_key: ((greenpeace_private_key))
+
+- name: infrastructure-bump
+  type: git
+  icon: github
+  source:
+    uri: git@github.com:concourse/infrastructure.git
+    branch: master
+    private_key: ((greenpeace_private_key))
+
+- name: notify
+  type: slack-notifier
+  icon: slack
+  source:
+    url: ((slack_hooks.concourse-interrupt))
+    username: ((basic_auth.username))
+    password: ((basic_auth.password))
+    concourse_url: https://ci.concourse-ci.org
+
+- name: dev-image
+  type: registry-image
+  icon: &image-icon docker
+  source:
+    repository: concourse/dev
+    tag: latest
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: concourse-image
+  type: registry-image
+  icon: *image-icon
+  source:
+    repository: concourse/concourse
+    tag: latest
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: unit-image
+  type: registry-image
+  icon: *image-icon
+  source:
+    repository: concourse/unit
+    tag: latest
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: golang-builder-image
+  type: registry-image
+  icon: *image-icon
+  source:
+    repository: concourse/golang-builder
+    username: ((docker.username))
+    password: ((docker.password))
+    variant: bionic
+
+- name: golang-builder-image-latest
+  type: registry-image
+  icon: *image-icon
+  source:
+    repository: concourse/golang-builder
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: postgres-image
+  type: registry-image
+  icon: *image-icon
+  source: {repository: postgres}
+
+- name: postgres-image-legacy
+  type: registry-image
+  icon: *image-icon
+  source: {repository: postgres, tag: 11}
+
+- name: vault-image
+  type: registry-image
+  icon: *image-icon
+  source: {repository: vault}
+
+- name: dumb-init
+  type: github-release
+  icon: &release-icon package-variant-closed
+  source:
+    owner: Yelp
+    repository: dumb-init
+    access_token: ((concourse_github_dummy.access_token))
+
+- name: bbr
+  type: github-release
+  icon: *release-icon
+  source:
+    owner: cloudfoundry-incubator
+    repository: bosh-backup-and-restore
+    access_token: ((concourse_github_dummy.access_token))
+
+- name: gdn
+  type: github-release
+  icon: *release-icon
+  source:
+    owner: cloudfoundry
+    repository: garden-runc-release
+    access_token: ((concourse_github_dummy.access_token))
+
+- name: containerd
+  type: github-release
+  icon: *release-icon
+  source:
+    owner: containerd
+    repository: containerd
+    access_token: ((concourse_github_dummy.access_token))
+
+- name: runc
+  type: github-release
+  icon: *release-icon
+  source:
+    owner: opencontainers
+    repository: runc
+    access_token: ((concourse_github_dummy.access_token))
+
+- name: cni
+  type: github-release
+  icon: *release-icon
+  source:
+    owner: containernetworking
+    repository: plugins
+    access_token: ((concourse_github_dummy.access_token))
+
+- name: mock-resource-alpine
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/mock-resource
+    variant: alpine
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: mock-resource-ubuntu
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/mock-resource
+    variant: ubuntu
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: bosh-io-release-resource-alpine
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/bosh-io-release-resource
+    variant: alpine
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: bosh-io-release-resource-ubuntu
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/bosh-io-release-resource
+    variant: ubuntu
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: bosh-io-stemcell-resource-alpine
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/bosh-io-stemcell-resource
+    variant: alpine
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: bosh-io-stemcell-resource-ubuntu
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/bosh-io-stemcell-resource
+    variant: ubuntu
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: cf-resource-alpine
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/cf-resource
+    variant: alpine
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: cf-resource-ubuntu
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/cf-resource
+    variant: ubuntu
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: docker-image-resource-alpine
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/docker-image-resource
+    variant: alpine
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: docker-image-resource-ubuntu
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/docker-image-resource
+    variant: ubuntu
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: git-resource-alpine
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/git-resource
+    variant: alpine
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: git-resource-ubuntu
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/git-resource
+    variant: ubuntu
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: github-release-resource-alpine
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/github-release-resource
+    variant: alpine
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: github-release-resource-ubuntu
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/github-release-resource
+    variant: ubuntu
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: hg-resource-alpine
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/hg-resource
+    variant: alpine
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: hg-resource-ubuntu
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/hg-resource
+    variant: ubuntu
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: pool-resource-alpine
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/pool-resource
+    variant: alpine
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: pool-resource-ubuntu
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/pool-resource
+    variant: ubuntu
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: registry-image-resource-alpine
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/registry-image-resource
+    variant: alpine
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: registry-image-resource-ubuntu
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/registry-image-resource
+    variant: ubuntu
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: s3-resource-alpine
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/s3-resource
+    variant: alpine
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: s3-resource-ubuntu
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/s3-resource
+    variant: ubuntu
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: semver-resource-alpine
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/semver-resource
+    variant: alpine
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: semver-resource-ubuntu
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/semver-resource
+    variant: ubuntu
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: time-resource-alpine
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/time-resource
+    variant: alpine
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: time-resource-ubuntu
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/time-resource
+    variant: ubuntu
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: tracker-resource-alpine
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/tracker-resource
+    variant: alpine
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: tracker-resource-ubuntu
+  type: registry-image
+  icon: *release-icon
+  source:
+    repository: concourse/tracker-resource
+    variant: ubuntu
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: oci-build-task
+  type: registry-image
+  icon: *image-icon
+  source: {repository: vito/oci-build-task}
+
+- name: linux-dev-alpine
+  type: gcs
+  icon: linux
+  source:
+    bucket: concourse-artifacts
+    json_key: ((concourse_artifacts_json_key))
+    regexp: dev/concourse-(.*)\.linux-alpine\.amd64\.tgz
+
+- name: linux-dev-ubuntu
+  type: gcs
+  icon: linux
+  source:
+    bucket: concourse-artifacts
+    json_key: ((concourse_artifacts_json_key))
+    regexp: dev/concourse-(.*)\.linux-ubuntu\.amd64\.tgz
+
+- name: windows-dev
+  type: gcs
+  icon: microsoft-windows
+  source:
+    bucket: concourse-artifacts
+    json_key: ((concourse_artifacts_json_key))
+    regexp: dev/concourse-(.*)\.windows\.amd64\.zip
+
+- name: darwin-dev
+  type: gcs
+  icon: apple
+  source:
+    bucket: concourse-artifacts
+    json_key: ((concourse_artifacts_json_key))
+    regexp: dev/concourse-(.*)\.darwin\.amd64\.tgz
+
+- name: docs
+  type: git
+  icon: *git-icon
+  source:
+    uri: https://github.com/concourse/docs
+    branch: master
+
+- name: concourse-release
+  type: bosh-release
+  icon: *release-icon
+  source:
+    uri: https://github.com/concourse/concourse-bosh-release
+    branch: master
+    dev_releases: true
+    private_config: &release_private_config
+      blobstore:
+        provider: gcs
+        options:
+          credentials_source: static
+          json_key: ((concourse_artifacts_json_key))
+
+- name: postgres-release
+  type: bosh-io-release
+  icon: *release-icon
+  source:
+    repository: cloudfoundry/postgres-release
+
+- name: bpm-release
+  type: bosh-io-release
+  icon: *release-icon
+  source:
+    repository: cloudfoundry/bpm-release
+
+- name: bbr-sdk-release
+  type: bosh-io-release
+  icon: *release-icon
+  source:
+    repository: cloudfoundry-incubator/backup-and-restore-sdk-release
+
+- name: vault-release
+  type: bosh-io-release
+  icon: *release-icon
+  source:
+    repository: vito/vault-boshrelease
+
+- name: credhub-release
+  type: bosh-io-release
+  icon: *release-icon
+  source:
+    repository: pivotal-cf/credhub-release
+
+- name: uaa-release
+  type: bosh-io-release
+  icon: *release-icon
+  source:
+    repository: cloudfoundry/uaa-release
+
+- name: concourse-release-repo
+  type: git
+  icon: *git-icon
+  source:
+    uri: git@github.com:concourse/concourse-bosh-release
+    branch: master
+    private_key: ((concourse_release_deploy_key))
+
+- name: smoke-deployment
+  tags: [bosh]
+  type: bosh-deployment
+  icon: fire
+  source:
+    target: https://10.0.0.6:25555
+    client: ((testing_bosh_client.id))
+    client_secret: ((testing_bosh_client.secret))
+    ca_cert: ((testing_bosh_ca_cert))
+    deployment: concourse-smoke
+
+- name: smoke-deployment-guardian
+  tags: [bosh]
+  type: bosh-deployment
+  icon: fire
+  source:
+    target: https://10.0.0.6:25555
+    client: ((testing_bosh_client.id))
+    client_secret: ((testing_bosh_client.secret))
+    ca_cert: ((testing_bosh_ca_cert))
+    deployment: concourse-smoke-guardian
+
+- name: gcp-bionic-stemcell
+  type: bosh-io-stemcell
+  icon: *release-icon
+  source:
+    name: bosh-google-kvm-ubuntu-bionic-go_agent
+
+- name: concourse-docker
+  type: git
+  icon: *git-icon
+  source:
+    uri: https://github.com/concourse/concourse-docker
+
+- name: concourse-chart
+  type: git
+  icon: *git-icon
+  source:
+    uri: git@github.com:concourse/concourse-chart.git
+    branch: dev
+    private_key: ((concourse_chart_private_key))
+
+- name: prometheus-chart
+  type: helm-chart
+  icon: &helm-icon ship-wheel
+  source:
+    chart: prometheus-community/prometheus
+    repos:
+      - name: prometheus-community
+        url: https://prometheus-community.github.io/helm-charts
+
+- name: postgresql-chart
+  type: helm-chart
+  icon: *helm-icon
+  source:
+    chart: bitnami/postgresql
+    repos:
+      - name: bitnami
+        url: https://charts.bitnami.com/bitnami
+
+- name: golang-linux
+  type: s3
+  icon: language-go
+  source:
+    endpoint: storage.googleapis.com
+    bucket: golang
+    regexp: 'go(\d+\.\d+(\.\d+)?)\.linux-amd64\.tar\.gz$'
+
+- name: resource-types-alpine-image
+  type: registry-image
+  icon: &image-icon docker
+  source:
+    repository: concourse/resource-types
+    tag: latest
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: resource-types-ubuntu-image
+  type: registry-image
+  icon: &image-icon docker
+  source:
+    repository: concourse/resource-types
+    tag: ubuntu
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: concourse-dev-alpine-image
+  type: registry-image
+  icon: *image-icon
+  source:
+    repository: concourse/concourse-dev
+    tag: latest
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: concourse-dev-ubuntu-image
+  type: registry-image
+  icon: *image-icon
+  source:
+    repository: concourse/concourse-dev
+    tag: ubuntu
+    username: ((docker.username))
+    password: ((docker.password))
+
+- name: ubuntu-bionic
+  type: registry-image
+  icon: *image-icon
+  source:
+    repository: ubuntu
+    tag: bionic
+    username: ((docker.username))
+    password: ((docker.password))

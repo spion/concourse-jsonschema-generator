@@ -29,11 +29,11 @@ pub fn main() {
       let contents = fs::read_to_string(path).unwrap();
       let lit_document = lit::parse(&contents);
       match lit_document {
-        Ok(doc) => convert::transform_to_jsonschemas(&doc),
+        Ok(doc) => convert::to_jsonschemas(&doc),
 
         Err(e) => {
-          println!("In {}", path);
-          println!("{}", e);
+          eprintln!("In {}", path);
+          eprintln!("{}", e);
           panic!("Unexpected parse error, aborting");
         }
       }
