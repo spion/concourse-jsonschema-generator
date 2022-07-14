@@ -20,6 +20,8 @@ struct Args {
 }
 
 pub fn main() {
+  env_logger::init();
+
   let args = Args::parse();
 
   let schema_docs = args

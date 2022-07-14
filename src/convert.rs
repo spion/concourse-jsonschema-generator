@@ -1,132 +1,100 @@
+use std::collections::HashMap;
+
+use itertools::Itertools;
+
 use crate::lit::types::{LitDocument, LitNode};
 use crate::schema::types::{Property, PropertyType, Schema};
 
 pub fn to_jsonschemas(doc: &LitDocument) -> Vec<Schema> {
   collect_schemas(doc)
 }
+
 fn collect_schemas(doc: &LitDocument) -> Vec<Schema> {
   doc
     .iter()
-    .flat_map(|node| {
-      let mut group_members: Vec<String> = vec![];
+    .flat_map(|node| match node {
+      LitNode::Text(_) => vec![],
 
-      match node {
-        LitNode::Text(_) => vec![],
+      LitNode::Fn(schema, args) if (schema == "schema") || (schema == "schema-group") => {
+        let mut found_schemas: Vec<Schema> = vec![];
 
-        LitNode::Fn(schema, args) if (schema == "schema") || (schema == "schema-group") => {
-          let mut found_schemas: Vec<Schema> = vec![];
+        let schema_name = text_to_markdown(&args[0])
+          .trim()
+          .replace("`", "_")
+          .replace("-", "_")
+          .replace(" ", "_")
+          .replace("__", "_")
+          .trim_start_matches("_")
+          .to_string();
 
-          let schema_name = text_to_markdown(&args[0])
-            .trim()
-            .replace("`", "_")
-            .replace("-", "_")
-            .replace(" ", "_")
-            .replace("__", "_")
-            .trim_start_matches("_")
-            .to_string();
+        log::debug!("In schema {}", schema_name);
 
-          log::debug!("In schema {}", schema_name);
-
-          let props = collect_attributes((if schema == "schema" {
+        let (attrs_vec, schemas_vecvec): (Vec<_>, Vec<_>) =
+          collect_attributes(if schema == "schema" {
             &args[1]
           } else {
             &args[2]
-          });
-
-          let props =
-          ;
-
-          found_schemas.extend(
-            args
-              .into_iter()
-              .flat_map(transform_to_jsonschemas_non_orphaned),
-          );
-
-          log::debug!("Out of schema {}", schema_name);
-
-          found_schemas.push(Schema {
-            part_of_group: schema == "schema-group",
-            group_members: group_members,
-            schema_name: schema_name,
-
-            properties: props,
-          });
-
-          found_schemas
-        }
-        LitNode::Fn(attribute_type, args)
-          if (attribute_type == "required-attribute" || attribute_type == "optional-attribute")
-            && collect_orphaned =>
-        {
-          let (inner_schemas, (prop_name, prop_value)) = convert_prop(&args, attribute_type);
-          log::debug!("Orphan attribute:{}", prop_name);
-
-          let orphaned_attr = Schema {
-            schema_name: "$orphaned:".to_string() + prop_name.as_str(),
-            part_of_group: false,
-            group_members: vec![],
-            properties: vec![(prop_name, prop_value)].into_iter().collect(),
-          };
-
-          vec![orphaned_attr]
-            .into_iter()
-            .chain(inner_schemas.into_iter())
-            .collect()
-        }
-        LitNode::Fn(_other_fn, args) => args
+          })
           .into_iter()
-          .flat_map(|n| transform_to_jsonschemas(n, collect_orphaned))
-          .collect(),
+          .unzip();
 
-        LitNode::Comment(_) => vec![],
+        let attributes = attrs_vec.into_iter().collect::<HashMap<String, Property>>();
+
+        let inner_schemas = schemas_vecvec.into_iter().flat_map(|svv| svv).collect_vec();
+        let child_schemas = args.into_iter().flat_map(collect_schemas).collect_vec();
+
+        log::debug!("Out of schema {}", schema_name);
+
+        found_schemas.push(Schema {
+          is_group_member: schema == "schema-group",
+          group_members: child_schemas
+            .iter()
+            .filter(|s| s.is_group_member)
+            .map(|s| s.schema_name.clone())
+            .collect(),
+          schema_name: schema_name,
+          properties: attributes,
+        });
+
+        found_schemas.extend(inner_schemas);
+        found_schemas.extend(child_schemas);
+
+        found_schemas
       }
+      // Do not collect schemas from props. Not your job.
+      LitNode::Fn(prop, _) if prop == "required-attribute" || prop == "optional-attribute" => {
+        vec![]
+      }
+      LitNode::Fn(_other_fn, args) => args.into_iter().flat_map(collect_schemas).collect(),
+      LitNode::Comment(_) => vec![],
     })
     .collect()
 }
 
-fn collect_attributes(doc: &LitDocument) {
-  let mut found_schemas: Vec<Schema> = vec![];
+fn collect_attributes(doc: &LitDocument) -> Vec<((String, Property), Vec<Schema>)> {
+  doc
+    .iter()
+    .flat_map(|node| match node {
+      LitNode::Text(_) => vec![],
 
-  doc.iter()
-  .flat_map(|node| match node {
-    LitNode::Text(_) => {
-      vec![]
-    }
-    LitNode::Fn(attribute_type, args)
-      if (attribute_type == "required-attribute"
-        || attribute_type == "optional-attribute") =>
-    {
-      let (inner_schemas, prop_value) = convert_prop(&args, attribute_type);
-      found_schemas.extend(inner_schemas);
-      vec![prop_value]
-    }
-    LitNode::Fn(other_fn, args) if (other_fn != "schema") => {
-      let inner_schemas = args
-        .into_iter()
-        .flat_map(transform_to_jsonschemas_orphaned)
-        .collect::<Vec<_>>();
+      LitNode::Fn(attribute_type, args)
+        if (attribute_type == "required-attribute" || attribute_type == "optional-attribute") =>
+      {
+        let prop_value = convert_prop(&args, attribute_type);
+        let inner_schemas: Vec<_> = args.iter().flat_map(collect_schemas).collect();
+        vec![(prop_value, inner_schemas)]
+      }
 
-      group_members.extend(
-        inner_schemas
-          .iter()
-          .filter(|s| s.part_of_group)
-          .map(|s| s.schema_name.clone())
-          .collect::<Vec<_>>(),
-      );
+      LitNode::Fn(other_fn, args) if (other_fn != "schema" && other_fn != "schema-group") => {
+        args.iter().flat_map(collect_attributes).collect::<Vec<_>>()
+      }
 
-      found_schemas.extend(inner_schemas);
-
-      vec![]
-    }
-    _ => vec![], //panic!("Unexpected non-property function call in schema"),
-  })
-  .collect()
+      _ => vec![],
+    })
+    .collect()
 }
 
-fn convert_prop(
-  args: &Vec<Vec<LitNode>>,
-  attribute_type: &String,
-) -> (Vec<Schema>, (String, Property)) {
+fn convert_prop(args: &Vec<Vec<LitNode>>, attribute_type: &String) -> (String, Property) {
   let prop_name = text_to_markdown(&args[0]).trim().to_string();
   log::debug!("- In prop {}", prop_name);
 
@@ -136,21 +104,16 @@ fn convert_prop(
 
   let documentation = &args[2];
 
-  let inner_schemas = transform_to_jsonschemas_orphaned(documentation);
-
   log::debug!("- Out prop {}", prop_name);
 
   (
-    inner_schemas,
-    (
-      prop_name,
-      Property {
-        required: attribute_type == "required-attribute",
-        docs: text_to_markdown(documentation).trim().to_string(),
-        type_name: parse_type(&type_name.replace("-", "_")),
-        list: is_list,
-      },
-    ),
+    prop_name,
+    Property {
+      required: attribute_type == "required-attribute",
+      docs: text_to_markdown(documentation).trim().to_string(),
+      type_name: parse_type(&type_name.replace("-", "_")),
+      list: is_list,
+    },
   )
 }
 
