@@ -71,26 +71,6 @@ jobs:
   public: true
   serial: true
   plan:
-  - in_parallel:
-    - get: ci
-      resource: ci-unit-image
-      trigger: true
-    - get: oci-build-task
-    - get: golang-builder-image
-      trigger: true
-      params: {format: oci}
-  - task: build
-    image: oci-build-task
-    privileged: true
-    config:
-      platform: linux
-      params:
-        CONTEXT: ci/dockerfiles/unit
-        IMAGE_ARG_base_image: golang-builder-image/image.tar
-      inputs: [{name: ci}, {name: golang-builder-image}]
-      outputs: [{name: image}]
-      caches: [{path: cache}]
-      run: {path: build}
   - put: unit-image
     params: {image: image/image.tar}
   on_failure: &failed-ci

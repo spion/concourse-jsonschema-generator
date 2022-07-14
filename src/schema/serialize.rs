@@ -12,6 +12,8 @@ fn prop_type_to_jsonschema(prop_type: &PropertyType, description: Option<&String
     PropertyType::OneOf(types) => {
       let all_types_count = types.len();
 
+      assert!(all_types_count > 0);
+
       let all_strings = types
         .iter()
         .map(|p| match p {
@@ -22,6 +24,8 @@ fn prop_type_to_jsonschema(prop_type: &PropertyType, description: Option<&String
         .collect::<Vec<_>>();
 
       if all_strings.len() == all_types_count {
+        log::debug!("Enum type {:?}", prop_type);
+
         format!(r#""type":"string","enum":[{}]"#, all_strings.join(","))
       } else if all_types_count == 1 {
         let inner = prop_type_to_jsonschema_nodocs(&types[0]);
@@ -74,22 +78,22 @@ pub fn serialize(schema_docs: &HashMap<String, Schema>) -> String {
         .collect::<Vec<_>>();
 
       let schema_obj = if schema_props.len() > 0 || schema.group_members.len() > 0 {
-        log::debug!(
-          "Schema {} has {} props and {} group members",
-          schema_name,
-          schema_props.len(),
-          schema.group_members.len()
-        );
-        let oneof_def = prop_type_to_jsonschema(
-          &PropertyType::OneOf(
-            schema
-              .group_members
-              .iter()
-              .map(|m| PropertyType::Ref(m.to_string()))
-              .collect(),
-          ),
-          None,
-        );
+        let oneof_def = if schema.group_members.len() > 0 {
+          let one_of = prop_type_to_jsonschema(
+            &PropertyType::OneOf(
+              schema
+                .group_members
+                .iter()
+                .map(|m| PropertyType::Ref(m.to_string()))
+                .collect(),
+            ),
+            None,
+          );
+
+          one_of[1..one_of.len() - 1].to_owned() + ","
+        } else {
+          "".to_owned()
+        };
 
         let required_props = schema
           .properties
@@ -99,18 +103,33 @@ pub fn serialize(schema_docs: &HashMap<String, Schema>) -> String {
           .join(",");
 
         let props_object = format!(
-          r#"{{"additionalProperties":false,"required":[{}],"type":"object","properties":{{{}}}}}"#,
+          r#""additionalProperties":{},"required":[{}],"type":"object","properties":{{{}}}"#,
+          if schema.is_group_member
+            || (schema.group_members.len() > 0 && schema.properties.len() > 0)
+          {
+            true
+          } else {
+            false
+          },
           required_props,
           schema_props.join(",")
         );
 
-        if schema.group_members.len() > 0 && schema_props.len() > 0 {
-          format!(r#"{{"allOf":[{},{}]}}"#, props_object, oneof_def)
-        } else if schema_props.len() > 1 {
-          props_object
-        } else {
-          oneof_def
-        }
+        log::debug!(
+          "Schema {} has {} props and {} group members",
+          schema_name,
+          schema_props.len(),
+          schema.group_members.len()
+        );
+        // if schema.group_members.len() > 0 && schema_props.len() > 0 {
+        format!(r#"{{{}{}}}"#, oneof_def, props_object)
+        // } else if schema_props.len() > 0 {
+        // assert!(props_object.len() > 0);
+        // props_object
+        // } else {
+        // assert!(oneof_def.len() > 0);
+        // oneof_def
+        // }
       } else if schema_name == "number" {
         r#"{"type":"number"}"#.to_string()
       } else if schema_name == "boolean" {
