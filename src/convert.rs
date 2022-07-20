@@ -9,6 +9,21 @@ pub fn to_jsonschemas(doc: &LitDocument) -> Vec<Schema> {
   collect_schemas(doc)
 }
 
+fn extend_child_properties(
+  child_schemas: &mut Vec<Schema>,
+  attributes: &HashMap<String, Property>,
+) {
+  if attributes.len() > 0 {
+    for child in child_schemas {
+      if !child.is_group_member {
+        continue;
+      }
+      let child_props = &mut child.properties;
+      child_props.extend(attributes.clone().into_iter());
+    }
+  }
+}
+
 fn collect_schemas(doc: &LitDocument) -> Vec<Schema> {
   doc
     .iter()
@@ -41,19 +56,29 @@ fn collect_schemas(doc: &LitDocument) -> Vec<Schema> {
         let attributes = attrs_vec.into_iter().collect::<HashMap<String, Property>>();
 
         let inner_schemas = schemas_vecvec.into_iter().flat_map(|svv| svv).collect_vec();
-        let child_schemas = args.into_iter().flat_map(collect_schemas).collect_vec();
+        let mut child_schemas = args.into_iter().flat_map(collect_schemas).collect_vec();
+
+        extend_child_properties(&mut child_schemas, &attributes);
 
         log::debug!("Out of schema {}", schema_name);
 
+        let group_members = child_schemas
+          .iter()
+          .filter(|s| s.is_group_member)
+          .map(|s| s.schema_name.clone())
+          .collect_vec();
+
+        let has_group_memberes = group_members.len() > 0;
+
         found_schemas.push(Schema {
           is_group_member: schema == "schema-group",
-          group_members: child_schemas
-            .iter()
-            .filter(|s| s.is_group_member)
-            .map(|s| s.schema_name.clone())
-            .collect(),
+          group_members: group_members,
           schema_name: schema_name,
-          properties: attributes,
+          properties: if has_group_memberes {
+            HashMap::new()
+          } else {
+            attributes
+          },
         });
 
         found_schemas.extend(inner_schemas);

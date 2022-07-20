@@ -146,14 +146,75 @@
       "type": "string"
     },
     "display_config": {},
-    "do_step": {},
+    "do_step": {
+      "additionalProperties": false,
+      "properties": {
+        "across": {
+          "description": "Contains a list of  schema.across_var  .      across_var      var  identifier    The name of the variable that will be added to the    local-vars  \" `.` \" var source  . This variable will only be  accessible in the scope of the step - each iteration of the step gets  its own scope.    If a variable of the same name already exists in the parent scope, a  warning will be printed.          values  [value]    The list of values that the  schema.across_var.var  var  will  iterate over when running the substep. If multiple  schema.across_var  vars    are configured, all combinations of values across all vars will run.    The list of values may also be interpolated. For instance, you may use  the  load-var-step  to first load a list of  schema.value    into a  local-vars  local var  , and then iterate across that dynamic  list of values.     \n@example  Value combinations \n   The following  schema.across  will run the task   `foo/build.yml` for each package defined in `foo/packages-to-build.json`   with Go 1.15 and 1.16.     ```yaml\nplan:\n- get: foo\n- load_var: packages\n  file: foo/packages-to-build.json\n- across:\n  - var: package\n    values: ((.:packages))\n  - var: go_version\n    values: ['1.15', '1.16']\n  task: build\n  file: foo/build.yml\n  vars:\n    go_version: ((.:go_version))\n    package: ((.:package))\n```     Supposing `foo/packages-to-build.json` had the following content:   ```json\n[\"./cmd/first\", \"./cmd/second\", \"./cmd/third\"]\n```     ...then the task `foo/build.yml` would be run with the following  var combinations:         `{package: \"./cmd/first\", go_version: \"1.15\"}`        `{package: \"./cmd/first\", go_version: \"1.16\"}`        `{package: \"./cmd/second\", go_version: \"1.15\"}`        `{package: \"./cmd/second\", go_version: \"1.16\"}`        `{package: \"./cmd/third\", go_version: \"1.15\"}`        `{package: \"./cmd/third\", go_version: \"1.16\"}`                   max_in_flight  `all` | number      Default `1` .  If set to `all` , the substep will run  with all combinations of the current var in parallel. If set to a    schema.number  , only that number of substeps may run in parallel.     \n@example  Multiple vars \n   If multiple  schema.across_var  vars  are configured, the  effective `max_in_flight` is multiplicative. For instance:     ```yaml\nplan:\n- across:\n  - var: var1\n    values: [a, b, c]\n    max_in_flight: all\n  - var: var2\n    values: [1, 2]\n  - var: var3\n    values: [foo, bar]\n    max_in_flight: 2\n```     Here, ** 6 substeps ** will run in parallel, since all 3 of   `var1` 's values can run in parallel, and 2 of `var3` 's  values can run in parallel.              fail_fast  boolean      Default `false` .  When enabled, the `across` step will  fail fast by returning as soon as any sub-step fails. This means that running steps  will be interrupted and pending steps will no longer be scheduled.",
+          "items": {
+            "$ref": "#/definitions/across_var"
+          },
+          "type": "array"
+        },
+        "attempts": {
+          "$ref": "#/definitions/number",
+          "description": "@example  Retrying a task \n   The following will run the task and retry it up to 9 times (for a total  of 10 attempts) if it fails:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  attempts: 10\n```          \n@example  Retrying with a timeout \n   When used in combination with `timeout` , the timeout applies to    each  step.    This semi-arbitary decision was made because often things either succeed  in a reasonable amount of time or fail due to hanging/flakiness. In this  case it seems more useful to allow each attempt the allotted timeout  rather than have one very long attempt prevent more attempts.     ```yaml\nplan:\n- get: flake\n- task: flaky-tests\n  file: flake/integration.yml\n  timeout: 10m\n  attempts: 3\n```"
+        },
+        "do": {
+          "description": "@example  Running multiple steps in a try \n   This can be used to perform multiple steps serially in a    try-step  :     ```yaml\njobs:\n- name: with-do\n  plan:\n  - try:\n      do:\n      - get: black-ice\n      - get: control-node\n      - get: cyberdeck\n\nresources:\n- name: black-ice\n  type: mock\n- name: control-node\n  type: mock\n- name: cyberdeck\n  type: mock\n```",
+          "items": {
+            "$ref": "#/definitions/step"
+          },
+          "type": "array"
+        },
+        "ensure": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Releasing a lock \n   The following build plan acquires a lock and then `ensure` s that the  lock is released.     ```yaml\nplan:\n- put: some-lock\n  params: {acquire: true}\n- task: integration\n  file: foo/integration.yml\n  ensure:\n    put: some-lock\n    params: {release: some-lock}\n```"
+        },
+        "on_abort": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Cleaning up `on_abort`\n   The following will perform the `cleanup` task only if the build is  aborted while the `unit` task was running:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_abort:\n    task: cleanup\n    file: foo/cleanup.yml\n```"
+        },
+        "on_error": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Sending a notification \n   Until notifications become first-class (  RFC  #28  https://github.com/concourse/rfcs/pull/28  , this step can be used to  notify folks if their builds errored out:     ```yaml\nplan:\n- do:\n  - get: ci\n  - task: unit\n    file: ci/unit.yml\n  on_error:\n    put: slack\n```"
+        },
+        "on_failure": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Alerting on failure \n   The following will perform the `alert` task only if the `unit`   task fails:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_failure:\n    task: alert\n    file: foo/alert.yml\n```"
+        },
+        "on_success": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Running on success \n   The following will perform the second task only if the first one  succeeds:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_success:\n    task: alert\n    file: foo/alert.yml\n```     Note that this is semantically equivalent to the following:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n- task: alert\n  file: foo/alert.yml\n```     The `on_success` hook is provided mainly for cases where there is an  equivalent  schema.on_failure  , and having them next to each  other is more clear."
+        },
+        "tags": {
+          "description": "Default `[]` .       \n@example  Running in a private network \n   You may have a private cluster only reachable by special workers  running on-premises. To run steps against those workers, just provide a  matching tag:     ```yaml\nplan:\n- get: my-repo\n- put: my-site\n  tags: [private]\n  params: {path: my-repo}\n- task: acceptance-tests\n  tags: [private]\n  file: my-repo/ci/acceptance.yml\n```",
+          "items": {
+            "$ref": "#/definitions/string"
+          },
+          "type": "array"
+        },
+        "timeout": {
+          "$ref": "#/definitions/duration",
+          "description": "@example  Giving up \n   The following will run the `unit` task and cancel it if it takes  longer than 1 hour and 30 minutes:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  timeout: 1h30m\n```"
+        }
+      },
+      "required": [
+        "do"
+      ],
+      "type": "object"
+    },
     "dummy_config": {},
     "dummy_var_source": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "config": {
           "$ref": "#/definitions/dummy_config",
           "description": "dummy_config      vars  vars    A mapping of var name to var value."
+        },
+        "name": {
+          "$ref": "#/definitions/string",
+          "description": "The name of the `((var))` source. This should be short and  simple. This name will be referenced  var-syntax  throughout  the config."
         },
         "type": {
           "description": "The `dummy` type supports configuring a static map of vars to values.    This is really only useful if you have no better alternative for credential  management but still have sensitive values that you would like to    creds-redacting  redact  them from build output.",
@@ -165,7 +226,8 @@
       },
       "required": [
         "config",
-        "type"
+        "type",
+        "name"
       ],
       "type": "object"
     },
@@ -184,8 +246,23 @@
       "type": "string"
     },
     "get_step": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
+        "across": {
+          "description": "Contains a list of  schema.across_var  .      across_var      var  identifier    The name of the variable that will be added to the    local-vars  \" `.` \" var source  . This variable will only be  accessible in the scope of the step - each iteration of the step gets  its own scope.    If a variable of the same name already exists in the parent scope, a  warning will be printed.          values  [value]    The list of values that the  schema.across_var.var  var  will  iterate over when running the substep. If multiple  schema.across_var  vars    are configured, all combinations of values across all vars will run.    The list of values may also be interpolated. For instance, you may use  the  load-var-step  to first load a list of  schema.value    into a  local-vars  local var  , and then iterate across that dynamic  list of values.     \n@example  Value combinations \n   The following  schema.across  will run the task   `foo/build.yml` for each package defined in `foo/packages-to-build.json`   with Go 1.15 and 1.16.     ```yaml\nplan:\n- get: foo\n- load_var: packages\n  file: foo/packages-to-build.json\n- across:\n  - var: package\n    values: ((.:packages))\n  - var: go_version\n    values: ['1.15', '1.16']\n  task: build\n  file: foo/build.yml\n  vars:\n    go_version: ((.:go_version))\n    package: ((.:package))\n```     Supposing `foo/packages-to-build.json` had the following content:   ```json\n[\"./cmd/first\", \"./cmd/second\", \"./cmd/third\"]\n```     ...then the task `foo/build.yml` would be run with the following  var combinations:         `{package: \"./cmd/first\", go_version: \"1.15\"}`        `{package: \"./cmd/first\", go_version: \"1.16\"}`        `{package: \"./cmd/second\", go_version: \"1.15\"}`        `{package: \"./cmd/second\", go_version: \"1.16\"}`        `{package: \"./cmd/third\", go_version: \"1.15\"}`        `{package: \"./cmd/third\", go_version: \"1.16\"}`                   max_in_flight  `all` | number      Default `1` .  If set to `all` , the substep will run  with all combinations of the current var in parallel. If set to a    schema.number  , only that number of substeps may run in parallel.     \n@example  Multiple vars \n   If multiple  schema.across_var  vars  are configured, the  effective `max_in_flight` is multiplicative. For instance:     ```yaml\nplan:\n- across:\n  - var: var1\n    values: [a, b, c]\n    max_in_flight: all\n  - var: var2\n    values: [1, 2]\n  - var: var3\n    values: [foo, bar]\n    max_in_flight: 2\n```     Here, ** 6 substeps ** will run in parallel, since all 3 of   `var1` 's values can run in parallel, and 2 of `var3` 's  values can run in parallel.              fail_fast  boolean      Default `false` .  When enabled, the `across` step will  fail fast by returning as soon as any sub-step fails. This means that running steps  will be interrupted and pending steps will no longer be scheduled.",
+          "items": {
+            "$ref": "#/definitions/across_var"
+          },
+          "type": "array"
+        },
+        "attempts": {
+          "$ref": "#/definitions/number",
+          "description": "@example  Retrying a task \n   The following will run the task and retry it up to 9 times (for a total  of 10 attempts) if it fails:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  attempts: 10\n```          \n@example  Retrying with a timeout \n   When used in combination with `timeout` , the timeout applies to    each  step.    This semi-arbitary decision was made because often things either succeed  in a reasonable amount of time or fail due to hanging/flakiness. In this  case it seems more useful to allow each attempt the allotted timeout  rather than have one very long attempt prevent more attempts.     ```yaml\nplan:\n- get: flake\n- task: flaky-tests\n  file: flake/integration.yml\n  timeout: 10m\n  attempts: 3\n```"
+        },
+        "ensure": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Releasing a lock \n   The following build plan acquires a lock and then `ensure` s that the  lock is released.     ```yaml\nplan:\n- put: some-lock\n  params: {acquire: true}\n- task: integration\n  file: foo/integration.yml\n  ensure:\n    put: some-lock\n    params: {release: some-lock}\n```"
+        },
         "get": {
           "description": "The fetched bits will be registered in the build's artifact namespace  under the given identifier. Subsequent  task-step  and    put-step  which list the identifier as an input will have a  copy of the bits in their working directory.     \n@example  Fetching a repo and passing it to a task \n   Almost every simple job will look something like this: fetch my code  with a  get-step  and do something (run tests) with it in a    task-step  .     ```yaml\njobs:\n- name: fetch-repo\n  plan:\n  - get: repo # fetches repo under artifact name \"repo\"\n  - task: ls-repo\n    config:\n      platform: linux\n      image_resource:\n        type: mock\n        source: {mirror_self: true}\n      # pass the \"repo\" artifact into the task\n      inputs:\n      - name: repo\n      run:\n        path: ls\n        args: [\"-lah\",\"repo\"]\n\nresources:\n- name: repo\n  type: git\n  source:\n    uri: https://github.com/concourse/examples.git\n```",
           "oneOf": [
@@ -196,6 +273,22 @@
               "$ref": "#/definitions/identifier"
             }
           ]
+        },
+        "on_abort": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Cleaning up `on_abort`\n   The following will perform the `cleanup` task only if the build is  aborted while the `unit` task was running:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_abort:\n    task: cleanup\n    file: foo/cleanup.yml\n```"
+        },
+        "on_error": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Sending a notification \n   Until notifications become first-class (  RFC  #28  https://github.com/concourse/rfcs/pull/28  , this step can be used to  notify folks if their builds errored out:     ```yaml\nplan:\n- do:\n  - get: ci\n  - task: unit\n    file: ci/unit.yml\n  on_error:\n    put: slack\n```"
+        },
+        "on_failure": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Alerting on failure \n   The following will perform the `alert` task only if the `unit`   task fails:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_failure:\n    task: alert\n    file: foo/alert.yml\n```"
+        },
+        "on_success": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Running on success \n   The following will perform the second task only if the first one  succeeds:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_success:\n    task: alert\n    file: foo/alert.yml\n```     Note that this is semantically equivalent to the following:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n- task: alert\n  file: foo/alert.yml\n```     The `on_success` hook is provided mainly for cases where there is an  equivalent  schema.on_failure  , and having them next to each  other is more clear."
         },
         "params": {
           "$ref": "#/definitions/config",
@@ -211,6 +304,17 @@
         "resource": {
           "$ref": "#/definitions/string",
           "description": "Defaults to the value of `get` .  The resource to fetch,  as configured in  schema.pipeline.resources  .    Use this attribute to rename a resource from the overall pipeline context  into the job-specific context.     \n@example  Re-labelling artifact \n    ```yaml\njobs:\n- name: fetch-repo\n  plan:\n  - get: thecode # fetches \"repo\" under artifact name \"thecode\"\n    resource: repo\n  - task: ls-repo\n    config:\n      platform: linux\n      image_resource:\n        type: mock\n        source: {mirror_self: true}\n      # pass the \"thecode\" artifact into the task\n      inputs:\n      - name: thecode\n      run:\n        path: ls\n        args: [\"-lah\",\"thecode\"]\n\nresources:\n- name: repo\n  type: git\n  source:\n    uri: https://github.com/concourse/examples.git\n```"
+        },
+        "tags": {
+          "description": "Default `[]` .       \n@example  Running in a private network \n   You may have a private cluster only reachable by special workers  running on-premises. To run steps against those workers, just provide a  matching tag:     ```yaml\nplan:\n- get: my-repo\n- put: my-site\n  tags: [private]\n  params: {path: my-repo}\n- task: acceptance-tests\n  tags: [private]\n  file: my-repo/ci/acceptance.yml\n```",
+          "items": {
+            "$ref": "#/definitions/string"
+          },
+          "type": "array"
+        },
+        "timeout": {
+          "$ref": "#/definitions/duration",
+          "description": "@example  Giving up \n   The following will run the `unit` task and cancel it if it takes  longer than 1 hour and 30 minutes:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  timeout: 1h30m\n```"
         },
         "trigger": {
           "$ref": "#/definitions/boolean",
@@ -289,7 +393,71 @@
       ],
       "type": "object"
     },
-    "in_parallel_step": {},
+    "in_parallel_step": {
+      "additionalProperties": false,
+      "properties": {
+        "across": {
+          "description": "Contains a list of  schema.across_var  .      across_var      var  identifier    The name of the variable that will be added to the    local-vars  \" `.` \" var source  . This variable will only be  accessible in the scope of the step - each iteration of the step gets  its own scope.    If a variable of the same name already exists in the parent scope, a  warning will be printed.          values  [value]    The list of values that the  schema.across_var.var  var  will  iterate over when running the substep. If multiple  schema.across_var  vars    are configured, all combinations of values across all vars will run.    The list of values may also be interpolated. For instance, you may use  the  load-var-step  to first load a list of  schema.value    into a  local-vars  local var  , and then iterate across that dynamic  list of values.     \n@example  Value combinations \n   The following  schema.across  will run the task   `foo/build.yml` for each package defined in `foo/packages-to-build.json`   with Go 1.15 and 1.16.     ```yaml\nplan:\n- get: foo\n- load_var: packages\n  file: foo/packages-to-build.json\n- across:\n  - var: package\n    values: ((.:packages))\n  - var: go_version\n    values: ['1.15', '1.16']\n  task: build\n  file: foo/build.yml\n  vars:\n    go_version: ((.:go_version))\n    package: ((.:package))\n```     Supposing `foo/packages-to-build.json` had the following content:   ```json\n[\"./cmd/first\", \"./cmd/second\", \"./cmd/third\"]\n```     ...then the task `foo/build.yml` would be run with the following  var combinations:         `{package: \"./cmd/first\", go_version: \"1.15\"}`        `{package: \"./cmd/first\", go_version: \"1.16\"}`        `{package: \"./cmd/second\", go_version: \"1.15\"}`        `{package: \"./cmd/second\", go_version: \"1.16\"}`        `{package: \"./cmd/third\", go_version: \"1.15\"}`        `{package: \"./cmd/third\", go_version: \"1.16\"}`                   max_in_flight  `all` | number      Default `1` .  If set to `all` , the substep will run  with all combinations of the current var in parallel. If set to a    schema.number  , only that number of substeps may run in parallel.     \n@example  Multiple vars \n   If multiple  schema.across_var  vars  are configured, the  effective `max_in_flight` is multiplicative. For instance:     ```yaml\nplan:\n- across:\n  - var: var1\n    values: [a, b, c]\n    max_in_flight: all\n  - var: var2\n    values: [1, 2]\n  - var: var3\n    values: [foo, bar]\n    max_in_flight: 2\n```     Here, ** 6 substeps ** will run in parallel, since all 3 of   `var1` 's values can run in parallel, and 2 of `var3` 's  values can run in parallel.              fail_fast  boolean      Default `false` .  When enabled, the `across` step will  fail fast by returning as soon as any sub-step fails. This means that running steps  will be interrupted and pending steps will no longer be scheduled.",
+          "items": {
+            "$ref": "#/definitions/across_var"
+          },
+          "type": "array"
+        },
+        "attempts": {
+          "$ref": "#/definitions/number",
+          "description": "@example  Retrying a task \n   The following will run the task and retry it up to 9 times (for a total  of 10 attempts) if it fails:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  attempts: 10\n```          \n@example  Retrying with a timeout \n   When used in combination with `timeout` , the timeout applies to    each  step.    This semi-arbitary decision was made because often things either succeed  in a reasonable amount of time or fail due to hanging/flakiness. In this  case it seems more useful to allow each attempt the allotted timeout  rather than have one very long attempt prevent more attempts.     ```yaml\nplan:\n- get: flake\n- task: flaky-tests\n  file: flake/integration.yml\n  timeout: 10m\n  attempts: 3\n```"
+        },
+        "ensure": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Releasing a lock \n   The following build plan acquires a lock and then `ensure` s that the  lock is released.     ```yaml\nplan:\n- put: some-lock\n  params: {acquire: true}\n- task: integration\n  file: foo/integration.yml\n  ensure:\n    put: some-lock\n    params: {release: some-lock}\n```"
+        },
+        "in_parallel": {
+          "description": "Steps are either configured as a array or within an    schema.in_parallel_config  .     \n@example  Fetching artifacts in parallel \n   Using the `in_parallel` step where possible is the easiest way  to speeding up a builds.    It is often used to fetch all dependent resources together at the  start of a build plan:     ```yaml\njobs:\n- name: get-in-parallel\n  plan:\n  - in_parallel:\n    - get: ci\n    - get: repo\n    - get: code\n\n\nresources:\n- name: repo\n  type: mock\n- name: code\n  type: mock\n- name: ci\n  type: mock\n```          \n@example  Running a build matrix \n   If any step in the `in_parallel` fails, the build will fail, making it  useful for build matrices:     ```yaml\nplan:\n- get: some-repo\n- in_parallel:\n  - task: unit-windows\n    file: some-repo/ci/windows.yml\n  - task: unit-linux\n    file: some-repo/ci/linux.yml\n  - task: unit-darwin\n    file: some-repo/ci/darwin.yml\n```",
+          "oneOf": [
+            {
+              "items": {
+                "$ref": "#/definitions/step"
+              },
+              "type": "array"
+            },
+            {
+              "$ref": "#/definitions/in_parallel_config"
+            }
+          ]
+        },
+        "on_abort": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Cleaning up `on_abort`\n   The following will perform the `cleanup` task only if the build is  aborted while the `unit` task was running:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_abort:\n    task: cleanup\n    file: foo/cleanup.yml\n```"
+        },
+        "on_error": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Sending a notification \n   Until notifications become first-class (  RFC  #28  https://github.com/concourse/rfcs/pull/28  , this step can be used to  notify folks if their builds errored out:     ```yaml\nplan:\n- do:\n  - get: ci\n  - task: unit\n    file: ci/unit.yml\n  on_error:\n    put: slack\n```"
+        },
+        "on_failure": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Alerting on failure \n   The following will perform the `alert` task only if the `unit`   task fails:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_failure:\n    task: alert\n    file: foo/alert.yml\n```"
+        },
+        "on_success": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Running on success \n   The following will perform the second task only if the first one  succeeds:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_success:\n    task: alert\n    file: foo/alert.yml\n```     Note that this is semantically equivalent to the following:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n- task: alert\n  file: foo/alert.yml\n```     The `on_success` hook is provided mainly for cases where there is an  equivalent  schema.on_failure  , and having them next to each  other is more clear."
+        },
+        "tags": {
+          "description": "Default `[]` .       \n@example  Running in a private network \n   You may have a private cluster only reachable by special workers  running on-premises. To run steps against those workers, just provide a  matching tag:     ```yaml\nplan:\n- get: my-repo\n- put: my-site\n  tags: [private]\n  params: {path: my-repo}\n- task: acceptance-tests\n  tags: [private]\n  file: my-repo/ci/acceptance.yml\n```",
+          "items": {
+            "$ref": "#/definitions/string"
+          },
+          "type": "array"
+        },
+        "timeout": {
+          "$ref": "#/definitions/duration",
+          "description": "@example  Giving up \n   The following will run the `unit` task and cancel it if it takes  longer than 1 hour and 30 minutes:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  timeout: 1h30m\n```"
+        }
+      },
+      "required": [
+        "in_parallel"
+      ],
+      "type": "object"
+    },
     "input": {
       "additionalProperties": false,
       "properties": {
@@ -386,14 +554,29 @@
         }
       },
       "required": [
-        "plan",
-        "name"
+        "name",
+        "plan"
       ],
       "type": "object"
     },
     "load_var_step": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
+        "across": {
+          "description": "Contains a list of  schema.across_var  .      across_var      var  identifier    The name of the variable that will be added to the    local-vars  \" `.` \" var source  . This variable will only be  accessible in the scope of the step - each iteration of the step gets  its own scope.    If a variable of the same name already exists in the parent scope, a  warning will be printed.          values  [value]    The list of values that the  schema.across_var.var  var  will  iterate over when running the substep. If multiple  schema.across_var  vars    are configured, all combinations of values across all vars will run.    The list of values may also be interpolated. For instance, you may use  the  load-var-step  to first load a list of  schema.value    into a  local-vars  local var  , and then iterate across that dynamic  list of values.     \n@example  Value combinations \n   The following  schema.across  will run the task   `foo/build.yml` for each package defined in `foo/packages-to-build.json`   with Go 1.15 and 1.16.     ```yaml\nplan:\n- get: foo\n- load_var: packages\n  file: foo/packages-to-build.json\n- across:\n  - var: package\n    values: ((.:packages))\n  - var: go_version\n    values: ['1.15', '1.16']\n  task: build\n  file: foo/build.yml\n  vars:\n    go_version: ((.:go_version))\n    package: ((.:package))\n```     Supposing `foo/packages-to-build.json` had the following content:   ```json\n[\"./cmd/first\", \"./cmd/second\", \"./cmd/third\"]\n```     ...then the task `foo/build.yml` would be run with the following  var combinations:         `{package: \"./cmd/first\", go_version: \"1.15\"}`        `{package: \"./cmd/first\", go_version: \"1.16\"}`        `{package: \"./cmd/second\", go_version: \"1.15\"}`        `{package: \"./cmd/second\", go_version: \"1.16\"}`        `{package: \"./cmd/third\", go_version: \"1.15\"}`        `{package: \"./cmd/third\", go_version: \"1.16\"}`                   max_in_flight  `all` | number      Default `1` .  If set to `all` , the substep will run  with all combinations of the current var in parallel. If set to a    schema.number  , only that number of substeps may run in parallel.     \n@example  Multiple vars \n   If multiple  schema.across_var  vars  are configured, the  effective `max_in_flight` is multiplicative. For instance:     ```yaml\nplan:\n- across:\n  - var: var1\n    values: [a, b, c]\n    max_in_flight: all\n  - var: var2\n    values: [1, 2]\n  - var: var3\n    values: [foo, bar]\n    max_in_flight: 2\n```     Here, ** 6 substeps ** will run in parallel, since all 3 of   `var1` 's values can run in parallel, and 2 of `var3` 's  values can run in parallel.              fail_fast  boolean      Default `false` .  When enabled, the `across` step will  fail fast by returning as soon as any sub-step fails. This means that running steps  will be interrupted and pending steps will no longer be scheduled.",
+          "items": {
+            "$ref": "#/definitions/across_var"
+          },
+          "type": "array"
+        },
+        "attempts": {
+          "$ref": "#/definitions/number",
+          "description": "@example  Retrying a task \n   The following will run the task and retry it up to 9 times (for a total  of 10 attempts) if it fails:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  attempts: 10\n```          \n@example  Retrying with a timeout \n   When used in combination with `timeout` , the timeout applies to    each  step.    This semi-arbitary decision was made because often things either succeed  in a reasonable amount of time or fail due to hanging/flakiness. In this  case it seems more useful to allow each attempt the allotted timeout  rather than have one very long attempt prevent more attempts.     ```yaml\nplan:\n- get: flake\n- task: flaky-tests\n  file: flake/integration.yml\n  timeout: 10m\n  attempts: 3\n```"
+        },
+        "ensure": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Releasing a lock \n   The following build plan acquires a lock and then `ensure` s that the  lock is released.     ```yaml\nplan:\n- put: some-lock\n  params: {acquire: true}\n- task: integration\n  file: foo/integration.yml\n  ensure:\n    put: some-lock\n    params: {release: some-lock}\n```"
+        },
         "file": {
           "$ref": "#/definitions/file_path",
           "description": "The path to a file whose content shall be read and used as the var's  value."
@@ -413,9 +596,36 @@
           "$ref": "#/definitions/identifier",
           "description": "The identifier will be the name of var, available to subsequent steps  as a  local-vars  local build var  .     \n@example  Loading a simple value as a var \n   The following pipeline loads vars from a text file whose contents are  used as a version number to  put-step `put` .     ```yaml\njobs:\n- name: loading-vars\n  plan:\n  - get: examples\n  - load_var: version\n    file: examples/misc/simple-value.txt\n  - put: img\n    params:\n      version: ((.:version))\n\n\nresources:\n- name: examples\n  type: git\n  icon: github\n  source:\n    uri: https://github.com/concourse/examples.git\n- name: img\n  type: mock\n```      `simple-value.txt` looks like this:    https://raw.githubusercontent.com/concourse/examples/master/misc/simple-value.txt"
         },
+        "on_abort": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Cleaning up `on_abort`\n   The following will perform the `cleanup` task only if the build is  aborted while the `unit` task was running:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_abort:\n    task: cleanup\n    file: foo/cleanup.yml\n```"
+        },
+        "on_error": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Sending a notification \n   Until notifications become first-class (  RFC  #28  https://github.com/concourse/rfcs/pull/28  , this step can be used to  notify folks if their builds errored out:     ```yaml\nplan:\n- do:\n  - get: ci\n  - task: unit\n    file: ci/unit.yml\n  on_error:\n    put: slack\n```"
+        },
+        "on_failure": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Alerting on failure \n   The following will perform the `alert` task only if the `unit`   task fails:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_failure:\n    task: alert\n    file: foo/alert.yml\n```"
+        },
+        "on_success": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Running on success \n   The following will perform the second task only if the first one  succeeds:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_success:\n    task: alert\n    file: foo/alert.yml\n```     Note that this is semantically equivalent to the following:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n- task: alert\n  file: foo/alert.yml\n```     The `on_success` hook is provided mainly for cases where there is an  equivalent  schema.on_failure  , and having them next to each  other is more clear."
+        },
         "reveal": {
           "$ref": "#/definitions/boolean",
           "description": "Default `false` .  If set to `true` , allow the var's  content to be printed in the build output even with secret redaction  enabled."
+        },
+        "tags": {
+          "description": "Default `[]` .       \n@example  Running in a private network \n   You may have a private cluster only reachable by special workers  running on-premises. To run steps against those workers, just provide a  matching tag:     ```yaml\nplan:\n- get: my-repo\n- put: my-site\n  tags: [private]\n  params: {path: my-repo}\n- task: acceptance-tests\n  tags: [private]\n  file: my-repo/ci/acceptance.yml\n```",
+          "items": {
+            "$ref": "#/definitions/string"
+          },
+          "type": "array"
+        },
+        "timeout": {
+          "$ref": "#/definitions/duration",
+          "description": "@example  Giving up \n   The following will run the `unit` task and cancel it if it takes  longer than 1 hour and 30 minutes:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  timeout: 1h30m\n```"
         }
       },
       "required": [
@@ -493,8 +703,23 @@
       "type": "object"
     },
     "put_step": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
+        "across": {
+          "description": "Contains a list of  schema.across_var  .      across_var      var  identifier    The name of the variable that will be added to the    local-vars  \" `.` \" var source  . This variable will only be  accessible in the scope of the step - each iteration of the step gets  its own scope.    If a variable of the same name already exists in the parent scope, a  warning will be printed.          values  [value]    The list of values that the  schema.across_var.var  var  will  iterate over when running the substep. If multiple  schema.across_var  vars    are configured, all combinations of values across all vars will run.    The list of values may also be interpolated. For instance, you may use  the  load-var-step  to first load a list of  schema.value    into a  local-vars  local var  , and then iterate across that dynamic  list of values.     \n@example  Value combinations \n   The following  schema.across  will run the task   `foo/build.yml` for each package defined in `foo/packages-to-build.json`   with Go 1.15 and 1.16.     ```yaml\nplan:\n- get: foo\n- load_var: packages\n  file: foo/packages-to-build.json\n- across:\n  - var: package\n    values: ((.:packages))\n  - var: go_version\n    values: ['1.15', '1.16']\n  task: build\n  file: foo/build.yml\n  vars:\n    go_version: ((.:go_version))\n    package: ((.:package))\n```     Supposing `foo/packages-to-build.json` had the following content:   ```json\n[\"./cmd/first\", \"./cmd/second\", \"./cmd/third\"]\n```     ...then the task `foo/build.yml` would be run with the following  var combinations:         `{package: \"./cmd/first\", go_version: \"1.15\"}`        `{package: \"./cmd/first\", go_version: \"1.16\"}`        `{package: \"./cmd/second\", go_version: \"1.15\"}`        `{package: \"./cmd/second\", go_version: \"1.16\"}`        `{package: \"./cmd/third\", go_version: \"1.15\"}`        `{package: \"./cmd/third\", go_version: \"1.16\"}`                   max_in_flight  `all` | number      Default `1` .  If set to `all` , the substep will run  with all combinations of the current var in parallel. If set to a    schema.number  , only that number of substeps may run in parallel.     \n@example  Multiple vars \n   If multiple  schema.across_var  vars  are configured, the  effective `max_in_flight` is multiplicative. For instance:     ```yaml\nplan:\n- across:\n  - var: var1\n    values: [a, b, c]\n    max_in_flight: all\n  - var: var2\n    values: [1, 2]\n  - var: var3\n    values: [foo, bar]\n    max_in_flight: 2\n```     Here, ** 6 substeps ** will run in parallel, since all 3 of   `var1` 's values can run in parallel, and 2 of `var3` 's  values can run in parallel.              fail_fast  boolean      Default `false` .  When enabled, the `across` step will  fail fast by returning as soon as any sub-step fails. This means that running steps  will be interrupted and pending steps will no longer be scheduled.",
+          "items": {
+            "$ref": "#/definitions/across_var"
+          },
+          "type": "array"
+        },
+        "attempts": {
+          "$ref": "#/definitions/number",
+          "description": "@example  Retrying a task \n   The following will run the task and retry it up to 9 times (for a total  of 10 attempts) if it fails:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  attempts: 10\n```          \n@example  Retrying with a timeout \n   When used in combination with `timeout` , the timeout applies to    each  step.    This semi-arbitary decision was made because often things either succeed  in a reasonable amount of time or fail due to hanging/flakiness. In this  case it seems more useful to allow each attempt the allotted timeout  rather than have one very long attempt prevent more attempts.     ```yaml\nplan:\n- get: flake\n- task: flaky-tests\n  file: flake/integration.yml\n  timeout: 10m\n  attempts: 3\n```"
+        },
+        "ensure": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Releasing a lock \n   The following build plan acquires a lock and then `ensure` s that the  lock is released.     ```yaml\nplan:\n- put: some-lock\n  params: {acquire: true}\n- task: integration\n  file: foo/integration.yml\n  ensure:\n    put: some-lock\n    params: {release: some-lock}\n```"
+        },
         "get_params": {
           "$ref": "#/definitions/config",
           "description": "Arbitrary configuration to pass to the resource during the implicit   `get` step. Refer to the resource type's documentation to see what  it supports.     \n@example  Parameterizing the implicit `get`\n   You can control the settings of the implicit `get` step  by setting `get_params` . For example, if you did not want a `put`   step utilizing the   `registry-image` resource  type  https://github.com/concourse/registry-image-resource  to download the  image, you would implement your `put` step as such:     ```yaml\nplan:\n- put: app-image\n  params:\n    build: git-resource\n  get_params:\n    skip_download: true\n```"
@@ -522,6 +747,22 @@
             }
           ]
         },
+        "on_abort": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Cleaning up `on_abort`\n   The following will perform the `cleanup` task only if the build is  aborted while the `unit` task was running:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_abort:\n    task: cleanup\n    file: foo/cleanup.yml\n```"
+        },
+        "on_error": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Sending a notification \n   Until notifications become first-class (  RFC  #28  https://github.com/concourse/rfcs/pull/28  , this step can be used to  notify folks if their builds errored out:     ```yaml\nplan:\n- do:\n  - get: ci\n  - task: unit\n    file: ci/unit.yml\n  on_error:\n    put: slack\n```"
+        },
+        "on_failure": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Alerting on failure \n   The following will perform the `alert` task only if the `unit`   task fails:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_failure:\n    task: alert\n    file: foo/alert.yml\n```"
+        },
+        "on_success": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Running on success \n   The following will perform the second task only if the first one  succeeds:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_success:\n    task: alert\n    file: foo/alert.yml\n```     Note that this is semantically equivalent to the following:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n- task: alert\n  file: foo/alert.yml\n```     The `on_success` hook is provided mainly for cases where there is an  equivalent  schema.on_failure  , and having them next to each  other is more clear."
+        },
         "params": {
           "$ref": "#/definitions/config",
           "description": "Arbitrary configuration to pass to the resource. Refer to the resource  type's documentation to see what it supports.     \n@example  Putting with params \n    ```yaml\njobs:\n- name: resource-params\n  plan:\n  - put: cyberdeck\n    params:\n      version: \"made-via-params\"\n\nresources:\n- name: cyberdeck\n  type: mock\n```"
@@ -540,6 +781,17 @@
         "resource": {
           "$ref": "#/definitions/string",
           "description": "Defaults to the value of `put` .  The resource to update,  as configured in  schema.pipeline.resources  .     \n@example  Re-label Put Resource \n    ```yaml\njobs:\n- name: fetch-repo\n  plan:\n    # puts to \"repo\" and fetches new version under artifact name \"thecode\"\n  - put: thecode\n    resource: repo\n    params:\n      version: put-only\n  - task: ls-repo\n    config:\n      platform: linux\n      image_resource:\n        type: mock\n        source: {mirror_self: true}\n      # pass the \"thecode\" artifact into the task\n      inputs:\n      - name: thecode\n      run:\n        path: ls\n        args: [\"-lah\",\"thecode\"]\n\nresources:\n- name: repo\n  type: mock\n```"
+        },
+        "tags": {
+          "description": "Default `[]` .       \n@example  Running in a private network \n   You may have a private cluster only reachable by special workers  running on-premises. To run steps against those workers, just provide a  matching tag:     ```yaml\nplan:\n- get: my-repo\n- put: my-site\n  tags: [private]\n  params: {path: my-repo}\n- task: acceptance-tests\n  tags: [private]\n  file: my-repo/ci/acceptance.yml\n```",
+          "items": {
+            "$ref": "#/definitions/string"
+          },
+          "type": "array"
+        },
+        "timeout": {
+          "$ref": "#/definitions/duration",
+          "description": "@example  Giving up \n   The following will run the `unit` task and cancel it if it takes  longer than 1 hour and 30 minutes:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  timeout: 1h30m\n```"
         }
       },
       "required": [
@@ -613,8 +865,8 @@
         }
       },
       "required": [
-        "source",
         "type",
+        "source",
         "name"
       ],
       "type": "object"
@@ -666,15 +918,30 @@
         }
       },
       "required": [
-        "name",
         "type",
+        "name",
         "source"
       ],
       "type": "object"
     },
     "set_pipeline_step": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
+        "across": {
+          "description": "Contains a list of  schema.across_var  .      across_var      var  identifier    The name of the variable that will be added to the    local-vars  \" `.` \" var source  . This variable will only be  accessible in the scope of the step - each iteration of the step gets  its own scope.    If a variable of the same name already exists in the parent scope, a  warning will be printed.          values  [value]    The list of values that the  schema.across_var.var  var  will  iterate over when running the substep. If multiple  schema.across_var  vars    are configured, all combinations of values across all vars will run.    The list of values may also be interpolated. For instance, you may use  the  load-var-step  to first load a list of  schema.value    into a  local-vars  local var  , and then iterate across that dynamic  list of values.     \n@example  Value combinations \n   The following  schema.across  will run the task   `foo/build.yml` for each package defined in `foo/packages-to-build.json`   with Go 1.15 and 1.16.     ```yaml\nplan:\n- get: foo\n- load_var: packages\n  file: foo/packages-to-build.json\n- across:\n  - var: package\n    values: ((.:packages))\n  - var: go_version\n    values: ['1.15', '1.16']\n  task: build\n  file: foo/build.yml\n  vars:\n    go_version: ((.:go_version))\n    package: ((.:package))\n```     Supposing `foo/packages-to-build.json` had the following content:   ```json\n[\"./cmd/first\", \"./cmd/second\", \"./cmd/third\"]\n```     ...then the task `foo/build.yml` would be run with the following  var combinations:         `{package: \"./cmd/first\", go_version: \"1.15\"}`        `{package: \"./cmd/first\", go_version: \"1.16\"}`        `{package: \"./cmd/second\", go_version: \"1.15\"}`        `{package: \"./cmd/second\", go_version: \"1.16\"}`        `{package: \"./cmd/third\", go_version: \"1.15\"}`        `{package: \"./cmd/third\", go_version: \"1.16\"}`                   max_in_flight  `all` | number      Default `1` .  If set to `all` , the substep will run  with all combinations of the current var in parallel. If set to a    schema.number  , only that number of substeps may run in parallel.     \n@example  Multiple vars \n   If multiple  schema.across_var  vars  are configured, the  effective `max_in_flight` is multiplicative. For instance:     ```yaml\nplan:\n- across:\n  - var: var1\n    values: [a, b, c]\n    max_in_flight: all\n  - var: var2\n    values: [1, 2]\n  - var: var3\n    values: [foo, bar]\n    max_in_flight: 2\n```     Here, ** 6 substeps ** will run in parallel, since all 3 of   `var1` 's values can run in parallel, and 2 of `var3` 's  values can run in parallel.              fail_fast  boolean      Default `false` .  When enabled, the `across` step will  fail fast by returning as soon as any sub-step fails. This means that running steps  will be interrupted and pending steps will no longer be scheduled.",
+          "items": {
+            "$ref": "#/definitions/across_var"
+          },
+          "type": "array"
+        },
+        "attempts": {
+          "$ref": "#/definitions/number",
+          "description": "@example  Retrying a task \n   The following will run the task and retry it up to 9 times (for a total  of 10 attempts) if it fails:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  attempts: 10\n```          \n@example  Retrying with a timeout \n   When used in combination with `timeout` , the timeout applies to    each  step.    This semi-arbitary decision was made because often things either succeed  in a reasonable amount of time or fail due to hanging/flakiness. In this  case it seems more useful to allow each attempt the allotted timeout  rather than have one very long attempt prevent more attempts.     ```yaml\nplan:\n- get: flake\n- task: flaky-tests\n  file: flake/integration.yml\n  timeout: 10m\n  attempts: 3\n```"
+        },
+        "ensure": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Releasing a lock \n   The following build plan acquires a lock and then `ensure` s that the  lock is released.     ```yaml\nplan:\n- put: some-lock\n  params: {acquire: true}\n- task: integration\n  file: foo/integration.yml\n  ensure:\n    put: some-lock\n    params: {release: some-lock}\n```"
+        },
         "file": {
           "$ref": "#/definitions/file_path",
           "description": "The path to the pipeline's configuration file.     `file` points at a `.yml` file containing the pipeline  configuration, which allows this to be tracked with your resources or  generated by a  task-step  .    The first segment in the path should refer to another artifact from the  plan, and the rest of the path is relative to that artifact.     \n@example  Fetching and configuring a pipeline \n   The  get-step  can be used to fetch your configuration from  a `git` repo and auto-configure it using a    set-pipeline-step  :     ```yaml\njobs:\n- name: set-pipeline\n  plan:\n  - get: examples\n    trigger: true\n  - set_pipeline: hello-world  # pipeline's name\n    file: examples/pipelines/hello-world.yml  # pipeline's config\n\nresources:\n- name: examples\n  type: git\n  icon: github\n  source:\n    uri: https://github.com/concourse/examples.git\n```"
@@ -682,6 +949,22 @@
         "instance_vars": {
           "$ref": "#/definitions/vars",
           "description": "A map of instance vars used to identify    instanced-pipelines  instanced pipelines  . These vars will also be    pipeline-static-vars  interpolated into the pipeline config  .    Note that variables set with this field will not propagate to tasks configured  via  schema.task.file  . If you want those variables to be determined  at the time the pipeline is set, use  schema.task.vars  as well.          instanced-pipelines  Instance pipelines  are experimental  and need to be enabled by setting the   `--enable-pipeline-instances` flag on the  web-node  .         \n@example  Configuring instance vars \n   The following pipeline will create one instance group with three  pipelines. The instance group is called `my-bots` and each  pipeline has a different set of `instance_vars` making it  distinct from the other pipelines in the instance group.   ```yaml\njobs:\n- name: set-pipeline-instance-group\n  plan:\n  - get: examples\n  - in_parallel:\n    - set_pipeline: my-bots\n      file: examples/pipelines/pipeline-vars.yml\n      instance_vars:\n        first: initial\n        number: \"9000\"\n        hello: HAL\n    - set_pipeline: my-bots\n      file: examples/pipelines/pipeline-vars.yml\n      instance_vars:\n        first: second\n        number: \"3000\"\n        hello: WALLY-E\n    - set_pipeline: my-bots\n      file: examples/pipelines/pipeline-vars.yml\n      instance_vars:\n        first: the-third\n        number: \"6000\"\n        hello: R2D2\n\nresources:\n- name: examples\n  type: git\n  icon: github\n  source:\n    uri: https://github.com/concourse/examples.git\n```        \n@example  Configuring instance vars and vars \n   Both `instance_vars` and `vars` may be statically. The  difference between the two fields is that `instance_vars` are  used to identify a pipeline and render the pipeline config.   `vars` are only used for rendering the pipeline config:     ```yaml\njobs:\n- name: set-pipeline-vars-and-instance-vars\n  plan:\n  - get: examples\n  - set_pipeline: my-bots\n    file: examples/pipelines/pipeline-vars.yml\n    instance_vars:\n      first: initial\n      number: \"9000\"\n    vars:\n      hello: HAL\n\nresources:\n- name: examples\n  type: git\n  icon: github\n  source:\n    uri: https://github.com/concourse/examples.git\n```"
+        },
+        "on_abort": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Cleaning up `on_abort`\n   The following will perform the `cleanup` task only if the build is  aborted while the `unit` task was running:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_abort:\n    task: cleanup\n    file: foo/cleanup.yml\n```"
+        },
+        "on_error": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Sending a notification \n   Until notifications become first-class (  RFC  #28  https://github.com/concourse/rfcs/pull/28  , this step can be used to  notify folks if their builds errored out:     ```yaml\nplan:\n- do:\n  - get: ci\n  - task: unit\n    file: ci/unit.yml\n  on_error:\n    put: slack\n```"
+        },
+        "on_failure": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Alerting on failure \n   The following will perform the `alert` task only if the `unit`   task fails:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_failure:\n    task: alert\n    file: foo/alert.yml\n```"
+        },
+        "on_success": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Running on success \n   The following will perform the second task only if the first one  succeeds:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_success:\n    task: alert\n    file: foo/alert.yml\n```     Note that this is semantically equivalent to the following:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n- task: alert\n  file: foo/alert.yml\n```     The `on_success` hook is provided mainly for cases where there is an  equivalent  schema.on_failure  , and having them next to each  other is more clear."
         },
         "set_pipeline": {
           "description": "The identifier specifies the name of the pipeline to configure. Unless    schema.set-pipeline.team  is set, it will be configured  within the current team and be created  unpaused  . If set to `self` ,  the current pipeline will update its own config.         `set_pipeline: self` was introduced in Concourse v6.5.0. It is  considered an ** experimental ** feature and may be removed at any  time. Contribute to the associated    discussion  https://github.com/concourse/concourse/discussions/5732    with feedback.           \n@example  One pipeline configuring another \n   This is a way to ensure a pipeline stays up to date with its definition in  a source code repository, eliminating the need to manually run    fly-set-pipeline  .     ```yaml\njobs:\n- name: set-pipeline\n  plan:\n  - get: examples\n    trigger: true\n  - set_pipeline: hello-world  # pipeline's name\n    file: examples/pipelines/hello-world.yml  # pipeline's config\n\nresources:\n- name: examples\n  type: git\n  icon: github\n  source:\n    uri: https://github.com/concourse/examples.git\n```",
@@ -697,9 +980,20 @@
             }
           ]
         },
+        "tags": {
+          "description": "Default `[]` .       \n@example  Running in a private network \n   You may have a private cluster only reachable by special workers  running on-premises. To run steps against those workers, just provide a  matching tag:     ```yaml\nplan:\n- get: my-repo\n- put: my-site\n  tags: [private]\n  params: {path: my-repo}\n- task: acceptance-tests\n  tags: [private]\n  file: my-repo/ci/acceptance.yml\n```",
+          "items": {
+            "$ref": "#/definitions/string"
+          },
+          "type": "array"
+        },
         "team": {
           "$ref": "#/definitions/identifier",
           "description": "By default, the `set_pipeline` step sets the pipeline for the  same  teams  team  that is running the build.    The `team` attribute can be used to specify another team.    Only the  main-team  is allowed to set another team's  pipeline.  Any team other than the  main-team  using the   `team` attribute will error, unless they reference their own team.        The `team` attribute was introduced in Concourse v6.4.0. It is  considered an ** experimental ** feature and may be removed at any  time. Contribute to the associated    discussion  https://github.com/concourse/concourse/discussions/5731    with feedback.         \n@example  Setting a pipeline on another team \n    ```yaml\njobs:\n- name: set-pipeline\n  plan:\n  - get: examples\n    trigger: true\n  - set_pipeline: hello-world\n    file: examples/pipelines/hello-world.yml\n    team: other-team  # name of the team goes here\n\nresources:\n- name: examples\n  type: git\n  icon: github\n  source:\n    uri: https://github.com/concourse/examples.git\n```"
+        },
+        "timeout": {
+          "$ref": "#/definitions/duration",
+          "description": "@example  Giving up \n   The following will run the `unit` task and cancel it if it takes  longer than 1 hour and 30 minutes:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  timeout: 1h30m\n```"
         },
         "var_files": {
           "description": "A list of paths to `.yml` files that will be passed to the  pipeline config in the same manner as the `--load-vars-from` flag  to  fly-set-pipeline  . This means that if a variable appears  in multiple files, the value from a file that is passed later in the  list will override the values from files earlier in the list.     \n@example  Configuring static vars with a vars file \n   Where the vars file looks like:    yaml  https://raw.githubusercontent.com/concourse/examples/master/pipelines/vars-file.yml      And the pipeline config is:     ```yaml\njobs:\n- name: set-pipeline-vars-only\n  plan:\n  - get: examples\n  - set_pipeline: pipeline-set-with-vars\n    file: examples/pipelines/pipeline-vars.yml\n    var_files:\n      - examples/pipelines/vars-file.yml\n\nresources:\n- name: examples\n  type: git\n  icon: github\n  source:\n    uri: https://github.com/concourse/examples.git\n```",
@@ -714,13 +1008,12 @@
         }
       },
       "required": [
-        "set_pipeline",
-        "file"
+        "file",
+        "set_pipeline"
       ],
       "type": "object"
     },
     "step": {
-      "additionalProperties": true,
       "oneOf": [
         {
           "$ref": "#/definitions/get_step"
@@ -746,53 +1039,7 @@
         {
           "$ref": "#/definitions/try_step"
         }
-      ],
-      "properties": {
-        "across": {
-          "description": "Contains a list of  schema.across_var  .      across_var      var  identifier    The name of the variable that will be added to the    local-vars  \" `.` \" var source  . This variable will only be  accessible in the scope of the step - each iteration of the step gets  its own scope.    If a variable of the same name already exists in the parent scope, a  warning will be printed.          values  [value]    The list of values that the  schema.across_var.var  var  will  iterate over when running the substep. If multiple  schema.across_var  vars    are configured, all combinations of values across all vars will run.    The list of values may also be interpolated. For instance, you may use  the  load-var-step  to first load a list of  schema.value    into a  local-vars  local var  , and then iterate across that dynamic  list of values.     \n@example  Value combinations \n   The following  schema.across  will run the task   `foo/build.yml` for each package defined in `foo/packages-to-build.json`   with Go 1.15 and 1.16.     ```yaml\nplan:\n- get: foo\n- load_var: packages\n  file: foo/packages-to-build.json\n- across:\n  - var: package\n    values: ((.:packages))\n  - var: go_version\n    values: ['1.15', '1.16']\n  task: build\n  file: foo/build.yml\n  vars:\n    go_version: ((.:go_version))\n    package: ((.:package))\n```     Supposing `foo/packages-to-build.json` had the following content:   ```json\n[\"./cmd/first\", \"./cmd/second\", \"./cmd/third\"]\n```     ...then the task `foo/build.yml` would be run with the following  var combinations:         `{package: \"./cmd/first\", go_version: \"1.15\"}`        `{package: \"./cmd/first\", go_version: \"1.16\"}`        `{package: \"./cmd/second\", go_version: \"1.15\"}`        `{package: \"./cmd/second\", go_version: \"1.16\"}`        `{package: \"./cmd/third\", go_version: \"1.15\"}`        `{package: \"./cmd/third\", go_version: \"1.16\"}`                   max_in_flight  `all` | number      Default `1` .  If set to `all` , the substep will run  with all combinations of the current var in parallel. If set to a    schema.number  , only that number of substeps may run in parallel.     \n@example  Multiple vars \n   If multiple  schema.across_var  vars  are configured, the  effective `max_in_flight` is multiplicative. For instance:     ```yaml\nplan:\n- across:\n  - var: var1\n    values: [a, b, c]\n    max_in_flight: all\n  - var: var2\n    values: [1, 2]\n  - var: var3\n    values: [foo, bar]\n    max_in_flight: 2\n```     Here, ** 6 substeps ** will run in parallel, since all 3 of   `var1` 's values can run in parallel, and 2 of `var3` 's  values can run in parallel.              fail_fast  boolean      Default `false` .  When enabled, the `across` step will  fail fast by returning as soon as any sub-step fails. This means that running steps  will be interrupted and pending steps will no longer be scheduled.",
-          "items": {
-            "$ref": "#/definitions/across_var"
-          },
-          "type": "array"
-        },
-        "attempts": {
-          "$ref": "#/definitions/number",
-          "description": "@example  Retrying a task \n   The following will run the task and retry it up to 9 times (for a total  of 10 attempts) if it fails:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  attempts: 10\n```          \n@example  Retrying with a timeout \n   When used in combination with `timeout` , the timeout applies to    each  step.    This semi-arbitary decision was made because often things either succeed  in a reasonable amount of time or fail due to hanging/flakiness. In this  case it seems more useful to allow each attempt the allotted timeout  rather than have one very long attempt prevent more attempts.     ```yaml\nplan:\n- get: flake\n- task: flaky-tests\n  file: flake/integration.yml\n  timeout: 10m\n  attempts: 3\n```"
-        },
-        "ensure": {
-          "$ref": "#/definitions/step",
-          "description": "@example  Releasing a lock \n   The following build plan acquires a lock and then `ensure` s that the  lock is released.     ```yaml\nplan:\n- put: some-lock\n  params: {acquire: true}\n- task: integration\n  file: foo/integration.yml\n  ensure:\n    put: some-lock\n    params: {release: some-lock}\n```"
-        },
-        "on_abort": {
-          "$ref": "#/definitions/step",
-          "description": "@example  Cleaning up `on_abort`\n   The following will perform the `cleanup` task only if the build is  aborted while the `unit` task was running:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_abort:\n    task: cleanup\n    file: foo/cleanup.yml\n```"
-        },
-        "on_error": {
-          "$ref": "#/definitions/step",
-          "description": "@example  Sending a notification \n   Until notifications become first-class (  RFC  #28  https://github.com/concourse/rfcs/pull/28  , this step can be used to  notify folks if their builds errored out:     ```yaml\nplan:\n- do:\n  - get: ci\n  - task: unit\n    file: ci/unit.yml\n  on_error:\n    put: slack\n```"
-        },
-        "on_failure": {
-          "$ref": "#/definitions/step",
-          "description": "@example  Alerting on failure \n   The following will perform the `alert` task only if the `unit`   task fails:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_failure:\n    task: alert\n    file: foo/alert.yml\n```"
-        },
-        "on_success": {
-          "$ref": "#/definitions/step",
-          "description": "@example  Running on success \n   The following will perform the second task only if the first one  succeeds:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_success:\n    task: alert\n    file: foo/alert.yml\n```     Note that this is semantically equivalent to the following:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n- task: alert\n  file: foo/alert.yml\n```     The `on_success` hook is provided mainly for cases where there is an  equivalent  schema.on_failure  , and having them next to each  other is more clear."
-        },
-        "tags": {
-          "description": "Default `[]` .       \n@example  Running in a private network \n   You may have a private cluster only reachable by special workers  running on-premises. To run steps against those workers, just provide a  matching tag:     ```yaml\nplan:\n- get: my-repo\n- put: my-site\n  tags: [private]\n  params: {path: my-repo}\n- task: acceptance-tests\n  tags: [private]\n  file: my-repo/ci/acceptance.yml\n```",
-          "items": {
-            "$ref": "#/definitions/string"
-          },
-          "type": "array"
-        },
-        "timeout": {
-          "$ref": "#/definitions/duration",
-          "description": "@example  Giving up \n   The following will run the `unit` task and cancel it if it takes  longer than 1 hour and 30 minutes:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  timeout: 1h30m\n```"
-        }
-      },
-      "required": [],
-      "type": "object"
+      ]
     },
     "string": {
       "type": "string"
@@ -859,8 +1106,19 @@
       "type": "object"
     },
     "task_step": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
+        "across": {
+          "description": "Contains a list of  schema.across_var  .      across_var      var  identifier    The name of the variable that will be added to the    local-vars  \" `.` \" var source  . This variable will only be  accessible in the scope of the step - each iteration of the step gets  its own scope.    If a variable of the same name already exists in the parent scope, a  warning will be printed.          values  [value]    The list of values that the  schema.across_var.var  var  will  iterate over when running the substep. If multiple  schema.across_var  vars    are configured, all combinations of values across all vars will run.    The list of values may also be interpolated. For instance, you may use  the  load-var-step  to first load a list of  schema.value    into a  local-vars  local var  , and then iterate across that dynamic  list of values.     \n@example  Value combinations \n   The following  schema.across  will run the task   `foo/build.yml` for each package defined in `foo/packages-to-build.json`   with Go 1.15 and 1.16.     ```yaml\nplan:\n- get: foo\n- load_var: packages\n  file: foo/packages-to-build.json\n- across:\n  - var: package\n    values: ((.:packages))\n  - var: go_version\n    values: ['1.15', '1.16']\n  task: build\n  file: foo/build.yml\n  vars:\n    go_version: ((.:go_version))\n    package: ((.:package))\n```     Supposing `foo/packages-to-build.json` had the following content:   ```json\n[\"./cmd/first\", \"./cmd/second\", \"./cmd/third\"]\n```     ...then the task `foo/build.yml` would be run with the following  var combinations:         `{package: \"./cmd/first\", go_version: \"1.15\"}`        `{package: \"./cmd/first\", go_version: \"1.16\"}`        `{package: \"./cmd/second\", go_version: \"1.15\"}`        `{package: \"./cmd/second\", go_version: \"1.16\"}`        `{package: \"./cmd/third\", go_version: \"1.15\"}`        `{package: \"./cmd/third\", go_version: \"1.16\"}`                   max_in_flight  `all` | number      Default `1` .  If set to `all` , the substep will run  with all combinations of the current var in parallel. If set to a    schema.number  , only that number of substeps may run in parallel.     \n@example  Multiple vars \n   If multiple  schema.across_var  vars  are configured, the  effective `max_in_flight` is multiplicative. For instance:     ```yaml\nplan:\n- across:\n  - var: var1\n    values: [a, b, c]\n    max_in_flight: all\n  - var: var2\n    values: [1, 2]\n  - var: var3\n    values: [foo, bar]\n    max_in_flight: 2\n```     Here, ** 6 substeps ** will run in parallel, since all 3 of   `var1` 's values can run in parallel, and 2 of `var3` 's  values can run in parallel.              fail_fast  boolean      Default `false` .  When enabled, the `across` step will  fail fast by returning as soon as any sub-step fails. This means that running steps  will be interrupted and pending steps will no longer be scheduled.",
+          "items": {
+            "$ref": "#/definitions/across_var"
+          },
+          "type": "array"
+        },
+        "attempts": {
+          "$ref": "#/definitions/number",
+          "description": "@example  Retrying a task \n   The following will run the task and retry it up to 9 times (for a total  of 10 attempts) if it fails:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  attempts: 10\n```          \n@example  Retrying with a timeout \n   When used in combination with `timeout` , the timeout applies to    each  step.    This semi-arbitary decision was made because often things either succeed  in a reasonable amount of time or fail due to hanging/flakiness. In this  case it seems more useful to allow each attempt the allotted timeout  rather than have one very long attempt prevent more attempts.     ```yaml\nplan:\n- get: flake\n- task: flaky-tests\n  file: flake/integration.yml\n  timeout: 10m\n  attempts: 3\n```"
+        },
         "config": {
           "$ref": "#/definitions/task_config",
           "description": "The  tasks  task config  to execute.   \n@example  Task config \n    ```yaml\njobs:\n- name: job\n  public: true\n  plan:\n  - task: simple-task\n    config: # contains all field in a task config\n      platform: linux\n      image_resource:\n        type: registry-image\n        source: { repository: busybox }\n      run:\n        path: echo\n        args: [\"Hello world!\"]\n```"
@@ -868,6 +1126,10 @@
         "container_limits": {
           "$ref": "#/definitions/container_limits",
           "description": "CPU and memory limits to enforce on the task container.    Note that these values, when specified, will override any limits set by  passing the `--default-task-cpu-limit` or   `--default-task-memory-limit` flags to the `concourse web` command.    These values will also override any configuration set on a    schema.task-config.container_limits  task's config   `container_limits` .      cpu  number    The maximum amount of CPU available to the task container, measured in  shares. 0 means unlimited.    CPU shares are relative to the CPU shares of other containers on a  worker. For example, if you have two containers both with a CPU  limit of 2 shares then each container will get 50% of the CPU's time.     ```\nContainer A: 2 shares - 50% CPU\nContainer B: 2 shares - 50% CPU\nTotal CPU shares declared: 4\n```     If you introduce another container then the number of CPU time per  container changes. CPU shares are relative to each other.   ```\nContainer A: 2 shares - 25% CPU\nContainer B: 2 shares - 25% CPU\nContainer C: 4 shares - 50% CPU\nTotal CPU shares declared: 8\n```           memory  number    The maximum amount of memory available to the task container, measured in  bytes. 0 means unlimited.         \n@example  Setting CPU and Memory limits \n   This task will only be given 10MB of memory and 2 CPU shares.     ```yaml\njobs:\n- name: limited-resources\n  plan:\n  - task: constrained-task\n    container_limits:\n      cpu: 2 # CPU shares are relative\n      memory: 10000000 # 10MB\n    config:\n      platform: linux\n      image_resource:\n        type: registry-image\n        source: { repository: busybox }\n      run:\n        path: echo\n        args: [\"Hello world!\"]\n```"
+        },
+        "ensure": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Releasing a lock \n   The following build plan acquires a lock and then `ensure` s that the  lock is released.     ```yaml\nplan:\n- put: some-lock\n  params: {acquire: true}\n- task: integration\n  file: foo/integration.yml\n  ensure:\n    put: some-lock\n    params: {release: some-lock}\n```"
         },
         "file": {
           "$ref": "#/definitions/file_path",
@@ -886,6 +1148,22 @@
           },
           "type": "object"
         },
+        "on_abort": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Cleaning up `on_abort`\n   The following will perform the `cleanup` task only if the build is  aborted while the `unit` task was running:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_abort:\n    task: cleanup\n    file: foo/cleanup.yml\n```"
+        },
+        "on_error": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Sending a notification \n   Until notifications become first-class (  RFC  #28  https://github.com/concourse/rfcs/pull/28  , this step can be used to  notify folks if their builds errored out:     ```yaml\nplan:\n- do:\n  - get: ci\n  - task: unit\n    file: ci/unit.yml\n  on_error:\n    put: slack\n```"
+        },
+        "on_failure": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Alerting on failure \n   The following will perform the `alert` task only if the `unit`   task fails:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_failure:\n    task: alert\n    file: foo/alert.yml\n```"
+        },
+        "on_success": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Running on success \n   The following will perform the second task only if the first one  succeeds:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_success:\n    task: alert\n    file: foo/alert.yml\n```     Note that this is semantically equivalent to the following:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n- task: alert\n  file: foo/alert.yml\n```     The `on_success` hook is provided mainly for cases where there is an  equivalent  schema.on_failure  , and having them next to each  other is more clear."
+        },
         "output_mapping": {
           "description": "A map from task output names to concrete names to register in the build  plan. This allows a task with generic output names to be used multiple  times in the same plan.     \n@example  Using with `input_mapping`\n   This is often used together with    schema.task.input_mapping  :    Given this task config:    yaml  https://raw.githubusercontent.com/concourse/examples/master/tasks/generic-outputs.yml      This pipeline will map the inputs and outputs of the task to match  the name of the resources in the pipeline.   ```yaml\njobs:\n- name: task-output-mapping\n  plan:\n  - in_parallel:\n    - get: repo\n    - get: repo-dev\n    - get: ci\n  - task: create-outputs\n    input_mapping:\n      main: repo\n      dev: repo-dev\n    output_mapping:\n      main: repo\n      dev: repo-dev\n    file: ci/tasks/generic-outputs.yml\n  - in_parallel:\n    - put: repo\n      params:\n        file: repo/version\n    - put: repo-dev\n      params:\n        file: repo-dev/version\n\nresources:\n- name: repo\n  type: mock\n- name: repo-dev\n  type: mock\n- name: ci\n  type: git\n  source:\n    uri: https://github.com/concourse/examples.git\n```",
           "patternProperties": {
@@ -903,9 +1181,20 @@
           "$ref": "#/definitions/boolean",
           "description": "Default `false` .  If set to `true` , the task will run  with escalated capabilities available on the task's platform.        Setting `privileged: true` is a gaping security hole; use wisely  and only if necessary. This is not part of the task configuration in  order to prevent privilege escalation via pull requests changing the  task file.        For the `linux` platform, this determines whether or not the  container will run in a separate user namespace. When set to   `true` , the container's `root` user is  actual     `root` , i.e. not in a user namespace. This is not recommended, and  should  never  be used with code you do not trust - e.g. pull  requests.    For macOS and Windows this field has no effect since workloads on  those machines are not containerized."
         },
+        "tags": {
+          "description": "Default `[]` .       \n@example  Running in a private network \n   You may have a private cluster only reachable by special workers  running on-premises. To run steps against those workers, just provide a  matching tag:     ```yaml\nplan:\n- get: my-repo\n- put: my-site\n  tags: [private]\n  params: {path: my-repo}\n- task: acceptance-tests\n  tags: [private]\n  file: my-repo/ci/acceptance.yml\n```",
+          "items": {
+            "$ref": "#/definitions/string"
+          },
+          "type": "array"
+        },
         "task": {
           "$ref": "#/definitions/identifier",
           "description": "The identifier value is just a name - short and sweet. The value is  shown in the web UI but otherwise has no affect on anything. This may  change in the future;  RFC  #32  https://github.com/concourse/rfcs/pull/32  proposes that the name  be used to reference a file within the project.     \n@example  Functions from inputs to outputs \n   You can think of tasks like functions. They have predefined inputs  and outputs and can be written in idempotent ways.    The following pipeline contains a function that increments a number.  You can think of the task `add-one` like this pseudo-function:     ```\nfunc AddOne(num int) int {\n  return num + 1\n}\n```      ```yaml\njobs:\n- name: idempotent-task\n  plan:\n  - get: counter\n  - task: add-one\n    config:\n      platform: linux\n      image_resource:\n        type: mock\n        source: {mirror_self: true}\n      inputs:\n      - name: counter\n      outputs:\n      - name: counter\n      run:\n        path: sh\n        args:\n        - -c\n        - |\n          COUNTER=$(cat counter/version)\n          NEXT=$(($COUNTER + 1))\n          echo \"new version: $NEXT\"\n          echo $NEXT > counter/next\n  - put: counter\n    params:\n      file: counter/next\n\nresources:\n- name: counter\n  type: mock\n  source:\n    initial_version: \"1\"\n```"
+        },
+        "timeout": {
+          "$ref": "#/definitions/duration",
+          "description": "@example  Giving up \n   The following will run the `unit` task and cancel it if it takes  longer than 1 hour and 30 minutes:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  timeout: 1h30m\n```"
         },
         "vars": {
           "$ref": "#/definitions/vars",
@@ -917,7 +1206,61 @@
       ],
       "type": "object"
     },
-    "try_step": {},
+    "try_step": {
+      "additionalProperties": false,
+      "properties": {
+        "across": {
+          "description": "Contains a list of  schema.across_var  .      across_var      var  identifier    The name of the variable that will be added to the    local-vars  \" `.` \" var source  . This variable will only be  accessible in the scope of the step - each iteration of the step gets  its own scope.    If a variable of the same name already exists in the parent scope, a  warning will be printed.          values  [value]    The list of values that the  schema.across_var.var  var  will  iterate over when running the substep. If multiple  schema.across_var  vars    are configured, all combinations of values across all vars will run.    The list of values may also be interpolated. For instance, you may use  the  load-var-step  to first load a list of  schema.value    into a  local-vars  local var  , and then iterate across that dynamic  list of values.     \n@example  Value combinations \n   The following  schema.across  will run the task   `foo/build.yml` for each package defined in `foo/packages-to-build.json`   with Go 1.15 and 1.16.     ```yaml\nplan:\n- get: foo\n- load_var: packages\n  file: foo/packages-to-build.json\n- across:\n  - var: package\n    values: ((.:packages))\n  - var: go_version\n    values: ['1.15', '1.16']\n  task: build\n  file: foo/build.yml\n  vars:\n    go_version: ((.:go_version))\n    package: ((.:package))\n```     Supposing `foo/packages-to-build.json` had the following content:   ```json\n[\"./cmd/first\", \"./cmd/second\", \"./cmd/third\"]\n```     ...then the task `foo/build.yml` would be run with the following  var combinations:         `{package: \"./cmd/first\", go_version: \"1.15\"}`        `{package: \"./cmd/first\", go_version: \"1.16\"}`        `{package: \"./cmd/second\", go_version: \"1.15\"}`        `{package: \"./cmd/second\", go_version: \"1.16\"}`        `{package: \"./cmd/third\", go_version: \"1.15\"}`        `{package: \"./cmd/third\", go_version: \"1.16\"}`                   max_in_flight  `all` | number      Default `1` .  If set to `all` , the substep will run  with all combinations of the current var in parallel. If set to a    schema.number  , only that number of substeps may run in parallel.     \n@example  Multiple vars \n   If multiple  schema.across_var  vars  are configured, the  effective `max_in_flight` is multiplicative. For instance:     ```yaml\nplan:\n- across:\n  - var: var1\n    values: [a, b, c]\n    max_in_flight: all\n  - var: var2\n    values: [1, 2]\n  - var: var3\n    values: [foo, bar]\n    max_in_flight: 2\n```     Here, ** 6 substeps ** will run in parallel, since all 3 of   `var1` 's values can run in parallel, and 2 of `var3` 's  values can run in parallel.              fail_fast  boolean      Default `false` .  When enabled, the `across` step will  fail fast by returning as soon as any sub-step fails. This means that running steps  will be interrupted and pending steps will no longer be scheduled.",
+          "items": {
+            "$ref": "#/definitions/across_var"
+          },
+          "type": "array"
+        },
+        "attempts": {
+          "$ref": "#/definitions/number",
+          "description": "@example  Retrying a task \n   The following will run the task and retry it up to 9 times (for a total  of 10 attempts) if it fails:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  attempts: 10\n```          \n@example  Retrying with a timeout \n   When used in combination with `timeout` , the timeout applies to    each  step.    This semi-arbitary decision was made because often things either succeed  in a reasonable amount of time or fail due to hanging/flakiness. In this  case it seems more useful to allow each attempt the allotted timeout  rather than have one very long attempt prevent more attempts.     ```yaml\nplan:\n- get: flake\n- task: flaky-tests\n  file: flake/integration.yml\n  timeout: 10m\n  attempts: 3\n```"
+        },
+        "ensure": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Releasing a lock \n   The following build plan acquires a lock and then `ensure` s that the  lock is released.     ```yaml\nplan:\n- put: some-lock\n  params: {acquire: true}\n- task: integration\n  file: foo/integration.yml\n  ensure:\n    put: some-lock\n    params: {release: some-lock}\n```"
+        },
+        "on_abort": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Cleaning up `on_abort`\n   The following will perform the `cleanup` task only if the build is  aborted while the `unit` task was running:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_abort:\n    task: cleanup\n    file: foo/cleanup.yml\n```"
+        },
+        "on_error": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Sending a notification \n   Until notifications become first-class (  RFC  #28  https://github.com/concourse/rfcs/pull/28  , this step can be used to  notify folks if their builds errored out:     ```yaml\nplan:\n- do:\n  - get: ci\n  - task: unit\n    file: ci/unit.yml\n  on_error:\n    put: slack\n```"
+        },
+        "on_failure": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Alerting on failure \n   The following will perform the `alert` task only if the `unit`   task fails:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_failure:\n    task: alert\n    file: foo/alert.yml\n```"
+        },
+        "on_success": {
+          "$ref": "#/definitions/step",
+          "description": "@example  Running on success \n   The following will perform the second task only if the first one  succeeds:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  on_success:\n    task: alert\n    file: foo/alert.yml\n```     Note that this is semantically equivalent to the following:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n- task: alert\n  file: foo/alert.yml\n```     The `on_success` hook is provided mainly for cases where there is an  equivalent  schema.on_failure  , and having them next to each  other is more clear."
+        },
+        "tags": {
+          "description": "Default `[]` .       \n@example  Running in a private network \n   You may have a private cluster only reachable by special workers  running on-premises. To run steps against those workers, just provide a  matching tag:     ```yaml\nplan:\n- get: my-repo\n- put: my-site\n  tags: [private]\n  params: {path: my-repo}\n- task: acceptance-tests\n  tags: [private]\n  file: my-repo/ci/acceptance.yml\n```",
+          "items": {
+            "$ref": "#/definitions/string"
+          },
+          "type": "array"
+        },
+        "timeout": {
+          "$ref": "#/definitions/duration",
+          "description": "@example  Giving up \n   The following will run the `unit` task and cancel it if it takes  longer than 1 hour and 30 minutes:     ```yaml\nplan:\n- get: foo\n- task: unit\n  file: foo/unit.yml\n  timeout: 1h30m\n```"
+        },
+        "try": {
+          "$ref": "#/definitions/step",
+          "description": "Performs the given step, ignoring any failure and masking it with  success.    This can be used when you want to perform some side-effect, but you  don't really want the whole build to fail if it doesn't work.     \n@example  Allowing non-critical behavior to fail \n   When emitting logs somewhere for analyzing later, if the destination flakes  out it may not really be critical, so we may want to just swallow the  error:     ```yaml\nplan:\n- task: run-tests\n  config: # ...\n  on_success:\n    try:\n      put: test-logs\n      params:\n        from: run-tests/*.log\n- task: do-something-else\n  config: # ...\n```"
+        }
+      },
+      "required": [
+        "try"
+      ],
+      "type": "object"
+    },
     "value": {},
     "var_source": {
       "oneOf": [
@@ -1019,11 +1362,15 @@
       "type": "object"
     },
     "vault_var_source": {
-      "additionalProperties": true,
+      "additionalProperties": false,
       "properties": {
         "config": {
           "$ref": "#/definitions/vault_config",
           "description": "Configuration for the Vault server has the following schema:      vault_config      url  string    The URL of the Vault API.          ca_cert  string    The PEM encoded contents of a CA certificate to use when  connecting to the API.          path_prefix  string      Default `/concourse` .  A prefix under which to  look for all credential values.    See  vault-path-prefix  for more information.          lookup_templates  [string]      Default `[\"/{{.Team}}/{{.Pipeline}}/{{.Secret}}\", \"/{{.Team}}/{{.Secret}}\"]` .      A list of path templates to be expanded in a team and pipeline context  subject to the `path_prefix` and `namespace` .    See  vault-lookup-templates  for more information.          shared_path  string    An additional path under which credentials will be looked up.    See  vault-shared-path  for more information.          namespace  string    A  Vault  namespace  https://www.vaultproject.io/docs/enterprise/namespaces/index.html    to operate under.          client_cert  string    A PEM encoded client certificate, for use with TLS based auth.    See  vault-cert-auth  for more information.          client_key  string    A PEM encoded client key, for use with TLS based auth.    See  vault-cert-auth  for more information.          server_name  string    The expected name of the server when connecting through TLS.          insecure_skip_verify  boolean    Skip TLS validation. Not recommended. Don't do it. No really,  don't.          client_token  string    Authenticate via a periodic client token.    See  vault-periodic-token  for more information.          auth_backend  string    Authenticate using an auth backend, e.g. `cert` or   `approle` .    See  vault-approle-auth  or  vault-cert-auth  for  more information.          auth_params  {string: string}    A key-value map of parameters to pass during authentication.    See  vault-approle-auth  for more information.          auth_max_ttl  duration    Maximum duration to elapse before forcing the client to log in  again.          auth_retry_max  duration    When failing to authenticate, give up after this amount of  time.          auth_retry_initial  duration    When retrying during authentication, start with this retry  interval. The interval will increase exponentially until   `auth_retry_max` is reached."
+        },
+        "name": {
+          "$ref": "#/definitions/string",
+          "description": "The name of the `((var))` source. This should be short and  simple. This name will be referenced  var-syntax  throughout  the config."
         },
         "type": {
           "description": "The `vault` type supports configuring a    Vault  https://www.vaultproject.io  server as a   `((var))` source.",
@@ -1034,8 +1381,9 @@
         }
       },
       "required": [
+        "config",
         "type",
-        "config"
+        "name"
       ],
       "type": "object"
     },

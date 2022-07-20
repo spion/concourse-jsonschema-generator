@@ -7,14 +7,14 @@ pub struct Schema {
   pub group_members: Vec<String>,
   pub properties: HashMap<String, Property>,
 }
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub struct Property {
   pub type_name: PropertyType,
   pub required: bool,
   pub list: bool,
   pub docs: String,
 }
-#[derive(Debug, PartialEq, Eq, Hash)]
+#[derive(Debug, PartialEq, Eq, Hash, Clone)]
 pub enum PropertyType {
   OneOf(Vec<PropertyType>),
   Constant(String),

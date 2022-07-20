@@ -56,14 +56,14 @@ pub fn serialize(schema_docs: &HashMap<String, Schema>) -> String {
 
       let mut result = json!({});
 
-      let additional_properties =
-        schema.is_group_member || (schema.group_members.len() > 0 && schema.properties.len() > 0);
+      // let additional_properties =
+      //   schema.is_group_member || (schema.group_members.len() > 0 && schema.properties.len() > 0);
 
       if schema_props.len() > 1 {
         merge(
           &mut result,
           &json!({
-            "additionalProperties":additional_properties,
+            "additionalProperties":false,
             "required":required_props,
             "type":"object",
             "properties":schema_props
