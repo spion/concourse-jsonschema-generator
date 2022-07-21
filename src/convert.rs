@@ -207,8 +207,8 @@ pub fn text_to_markdown(nodes: &Vec<LitNode>) -> String {
       }
       LitNode::Fn(codeblock, args) if (codeblock == "codeblock") => {
         format!(
-          "```{}\n{}\n```",
-          raw_text(&args[0]).trim(),
+          "\n\n{}\n\n",
+          // raw_text(&args[0]).trim(),
           trim_codeblock(&raw_text(&args[1]))
         )
       }
@@ -256,9 +256,10 @@ pub fn trim_codeblock(text: &str) -> String {
         l.trim()
       }
     })
-    .collect::<Vec<_>>()
+    .map(|l| format!("    {}", l))
+    // .collect_v
     .join("\n")
-    .trim()
+    // .trim()
     .to_string()
 }
 
