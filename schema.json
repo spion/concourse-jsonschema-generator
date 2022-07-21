@@ -37,8 +37,8 @@
         }
       },
       "required": [
-        "var",
-        "values"
+        "values",
+        "var"
       ],
       "type": "object"
     },
@@ -225,9 +225,9 @@
         }
       },
       "required": [
-        "type",
         "config",
-        "name"
+        "name",
+        "type"
       ],
       "type": "object"
     },
@@ -237,7 +237,7 @@
     "env_vars": {
       "patternProperties": {
         ".*": {
-          "type": "string"
+          "additionalProperties": true
         }
       },
       "type": "object"
@@ -554,8 +554,8 @@
         }
       },
       "required": [
-        "plan",
-        "name"
+        "name",
+        "plan"
       ],
       "type": "object"
     },
@@ -629,8 +629,8 @@
         }
       },
       "required": [
-        "load_var",
-        "file"
+        "file",
+        "load_var"
       ],
       "type": "object"
     },
@@ -865,9 +865,9 @@
         }
       },
       "required": [
+        "name",
         "source",
-        "type",
-        "name"
+        "type"
       ],
       "type": "object"
     },
@@ -918,8 +918,8 @@
         }
       },
       "required": [
-        "source",
         "name",
+        "source",
         "type"
       ],
       "type": "object"
@@ -1099,8 +1099,8 @@
         }
       },
       "required": [
-        "platform",
         "image_resource",
+        "platform",
         "run"
       ],
       "type": "object"
@@ -1381,9 +1381,9 @@
         }
       },
       "required": [
-        "type",
         "config",
-        "name"
+        "name",
+        "type"
       ],
       "type": "object"
     },

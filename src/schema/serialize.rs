@@ -47,12 +47,14 @@ pub fn serialize(schema_docs: &HashMap<String, Schema>) -> String {
         json!({})
       };
 
-      let required_props = schema
+      let mut required_props = schema
         .properties
         .iter()
         .filter(|(_, prop)| prop.required)
         .map(|(name, _)| name)
         .collect_vec();
+
+      required_props.sort();
 
       let mut result = json!({});
 
@@ -90,9 +92,9 @@ pub fn serialize(schema_docs: &HashMap<String, Schema>) -> String {
         json!({"type":"boolean"})
       } else if schema_name == "value" {
         json!({})
-      } else if schema_name == "config" || schema_name == "vars" {
+      } else if schema_name == "config" || schema_name == "vars" || schema_name == "env_vars" {
         json!({"type":"object","patternProperties":{".*":{"additionalProperties":true}}})
-      } else if schema_name == "env_vars" || schema_name == "version" {
+      } else if schema_name == "version" {
         json!({"type":"object","patternProperties":{".*":{"type":"string"}}})
       } else {
         json!({"type": "string"})
